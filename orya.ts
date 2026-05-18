@@ -61,6 +61,25 @@ let lastSessionId = "";
  * "message" event, cleared when the first reply arrives or turn.done. */
 let turnStartedAt: number | null = null;
 let firstReplyShown = false;
+let thinkingInterval: ReturnType<typeof setInterval> | null = null;
+
+function startThinking() {
+  if (thinkingInterval) return;
+  thinkingInterval = setInterval(() => {
+    if (!turnStartedAt) return;
+    const ms = Date.now() - turnStartedAt;
+    const display = ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+    process.stdout.write(`\r\x1b[K${C.dim(`Orya réfléchit… ${display}`)}`);
+  }, 250);
+}
+
+function stopThinking() {
+  if (thinkingInterval) {
+    clearInterval(thinkingInterval);
+    thinkingInterval = null;
+  }
+  process.stdout.write("\r\x1b[K");
+}
 
 console.log(C.dim(`→ connecting to ${SERVER}…`));
 const ws = new WebSocket(SERVER);
@@ -112,6 +131,7 @@ function render(ev: ServerEvent): void {
       break;
 
     case "reply": {
+      stopThinking();
       let suffix = "";
       if (!firstReplyShown && turnStartedAt) {
         const ms = Date.now() - turnStartedAt;
@@ -145,6 +165,7 @@ function render(ev: ServerEvent): void {
 
     case "trace":
       if (ev.node === "turn.done") {
+        stopThinking();
         turnStartedAt = null;
         firstReplyShown = false;
         if (trace) {
@@ -202,6 +223,7 @@ rl.on("line", (raw) => {
   const ev: ClientEvent = { type: "message", text };
   turnStartedAt = Date.now();
   firstReplyShown = false;
+  startThinking();
   ws.send(JSON.stringify(ev));
 });
 
@@ -246,6 +268,7 @@ function handleCommand(cmd: string) {
       const ev: ClientEvent = { type: "message", text: String(n) };
       turnStartedAt = Date.now();
       firstReplyShown = false;
+      startThinking();
       ws.send(JSON.stringify(ev));
       return;
     }
@@ -253,6 +276,7 @@ function handleCommand(cmd: string) {
       const ev: ClientEvent = { type: "tutoyer", accept: true };
       turnStartedAt = Date.now();
       firstReplyShown = false;
+      startThinking();
       ws.send(JSON.stringify(ev));
       return;
     }
@@ -260,6 +284,7 @@ function handleCommand(cmd: string) {
       const ev: ClientEvent = { type: "tutoyer", accept: false };
       turnStartedAt = Date.now();
       firstReplyShown = false;
+      startThinking();
       ws.send(JSON.stringify(ev));
       return;
     }
@@ -270,6 +295,7 @@ function handleCommand(cmd: string) {
       };
       turnStartedAt = Date.now();
       firstReplyShown = false;
+      startThinking();
       ws.send(JSON.stringify(ev));
       return;
     }
