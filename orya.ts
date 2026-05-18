@@ -1,16 +1,13 @@
 /**
- * Orya CLI client.
+ * Sandbox CLI client.
  *
- * Connects to an Orya sandbox server over WebSocket and lets you chat
- * with Orya from the terminal. Mirrors a WhatsApp conversation: typing
+ * Connects to the sandbox server over WebSocket and lets you chat with
+ * Orya from the terminal. Mirrors a WhatsApp conversation: typing
  * indicators, candidate cards, system traces.
  *
- *   bun orya.ts                            (default user)
- *   bun orya.ts --user friend-jean         (named user)
- *   bun orya.ts --trace                    (verbose trace events)
- *
- * Configure the server endpoint:
- *   export SANDBOX_WS=wss://orya-cli.example.com/ws
+ *   bun orya.ts                     (default user)
+ *   bun orya.ts --user user-cli2   (named user)
+ *   bun orya.ts --trace             (verbose trace events)
  *
  * Type messages and press Enter to send.
  *   /quit       → exit
@@ -20,6 +17,8 @@
  *   /vouvoyer   → refuse tutoiement
  *   /facts      → ask the server to dump known facts (synthetic message)
  */
+
+
 
 import readline from "node:readline";
 import process from "node:process";
@@ -36,7 +35,7 @@ for (let i = 0; i < argv.length; i++) {
   } else if (argv[i] === "--trace") {
     trace = true;
   } else if (argv[i] === "--help" || argv[i] === "-h") {
-    console.log("Usage: bun sandbox/cli/index.ts [--user <id>] [--trace]");
+    console.log("Usage: bun orya.ts [--user <id>] [--trace]");
     process.exit(0);
   }
 }
@@ -58,6 +57,10 @@ const C = {
 // ── Connection ────────────────────────────────────────────────────
 let lastCandidates: Candidate[] = [];
 let lastSessionId = "";
+/** Timestamp of the last user message sent. Set when the CLI sends a
+ * "message" event, cleared when the first reply arrives or turn.done. */
+let turnStartedAt: number | null = null;
+let firstReplyShown = false;
 
 console.log(C.dim(`→ connecting to ${SERVER}…`));
 const ws = new WebSocket(SERVER);
@@ -108,9 +111,17 @@ function render(ev: ServerEvent): void {
       if (ev.value) process.stdout.write(C.dim("Orya écrit…"));
       break;
 
-    case "reply":
-      console.log(C.bold(C.green("Orya  ")) + ev.text);
+    case "reply": {
+      let suffix = "";
+      if (!firstReplyShown && turnStartedAt) {
+        const ms = Date.now() - turnStartedAt;
+        const display = ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+        suffix = "  " + C.dim(`(${display})`);
+        firstReplyShown = true;
+      }
+      console.log(C.bold(C.green("Orya  ")) + ev.text + suffix);
       break;
+    }
 
     case "candidates": {
       lastCandidates = ev.candidates;
@@ -133,7 +144,13 @@ function render(ev: ServerEvent): void {
       break;
 
     case "trace":
-      if (trace) {
+      if (ev.node === "turn.done") {
+        turnStartedAt = null;
+        firstReplyShown = false;
+        if (trace) {
+          console.log(C.dim(`· turn.done ${JSON.stringify(ev.payload)}`));
+        }
+      } else if (trace) {
         console.log(C.dim(`· ${ev.node} ${JSON.stringify(ev.payload)}`));
       }
       break;
@@ -183,6 +200,8 @@ rl.on("line", (raw) => {
   }
 
   const ev: ClientEvent = { type: "message", text };
+  turnStartedAt = Date.now();
+  firstReplyShown = false;
   ws.send(JSON.stringify(ev));
 });
 
@@ -225,16 +244,22 @@ function handleCommand(cmd: string) {
         return;
       }
       const ev: ClientEvent = { type: "message", text: String(n) };
+      turnStartedAt = Date.now();
+      firstReplyShown = false;
       ws.send(JSON.stringify(ev));
       return;
     }
     case "/tutoyer": {
       const ev: ClientEvent = { type: "tutoyer", accept: true };
+      turnStartedAt = Date.now();
+      firstReplyShown = false;
       ws.send(JSON.stringify(ev));
       return;
     }
     case "/vouvoyer": {
       const ev: ClientEvent = { type: "tutoyer", accept: false };
+      turnStartedAt = Date.now();
+      firstReplyShown = false;
       ws.send(JSON.stringify(ev));
       return;
     }
@@ -243,6 +268,8 @@ function handleCommand(cmd: string) {
         type: "message",
         text: "Au fait, qu'est-ce que vous savez de moi pour le moment ?",
       };
+      turnStartedAt = Date.now();
+      firstReplyShown = false;
       ws.send(JSON.stringify(ev));
       return;
     }
