@@ -1,0 +1,15 @@
+{
+  "name": "orya-cli",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Terminal CLI to chat with Orya through a sandbox server",
+  "type": "module",
+  "scripts": {
+    "start": "bun orya.ts",
+    "tsc": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.14",
+    "typescript": "^5.6.2"
+  }
+}
