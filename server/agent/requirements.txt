@@ -27,5 +27,3 @@ graphiti-core[falkordb]>=0.11
 # LangSmith (auto-traces LangChain & LangGraph when env vars set)
 langsmith>=0.2
 
-# Local embeddings (no API, no rate limits)
-sentence-transformers>=3.0
