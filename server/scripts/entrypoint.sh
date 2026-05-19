@@ -9,5 +9,8 @@ chmod 700 /var/lib/postgresql/data || true
 chown -R neo4j:adm /var/lib/neo4j
 chown -R neo4j:adm /usr/share/neo4j || true
 
+# Ensure Neo4j listens on all interfaces (0.0.0.0) instead of localhost
+echo "server.default_listen_address=0.0.0.0" >> /etc/neo4j/neo4j.conf
+
 # Execute supervisord
 exec /usr/bin/supervisord -n -c /etc/supervisor/conf.d/orya.conf
