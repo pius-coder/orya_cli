@@ -23,7 +23,24 @@ async def check_neo4j():
         print("Neo4j is UP and authenticated!", flush=True)
         return True
     except Exception as e:
-        print(f"Neo4j not ready yet: {e}", flush=True)
+        err_str = str(e)
+        # Check if it's an authorization error
+        if "unauthorized" in err_str.lower() or "unauthenticated" in err_str.lower() or "security" in err_str.lower():
+            print("Configured password unauthorized. Trying default credentials 'neo4j/neo4j' to self-heal...", flush=True)
+            default_driver = AsyncGraphDatabase.driver(uri, auth=("neo4j", "neo4j"))
+            try:
+                # Execute the password change command on the system database
+                async with default_driver.session(database="system") as session:
+                    await session.run(
+                        f"ALTER CURRENT USER SET PASSWORD FROM 'neo4j' TO '{password}'"
+                    )
+                print(f"Self-healed: Changed Neo4j default password to configured password!", flush=True)
+            except Exception as default_e:
+                print(f"Could not change default password: {default_e}", flush=True)
+            finally:
+                await default_driver.close()
+        else:
+            print(f"Neo4j not ready yet: {e}", flush=True)
         return False
     finally:
         await driver.close()
