@@ -1,9 +1,14 @@
 """
-LLM Router — Cycles between free providers (Groq, Nvidia, OpenRouter)
-with automatic fallback on rate-limit or error.
+LLM Router — Cycles between free providers with automatic fallback.
 
-Strategy: Try providers in order. If one fails (429, 5xx, timeout),
-move to the next. Rotate the priority each call to spread load.
+Providers (all OpenAI-compatible):
+1. Groq   — Llama 4 Scout (very fast, high RPM)
+2. Nvidia — Llama 4 Maverick (high quality)
+3. Cerebras — Llama 3.1 8B (fastest inference, high RPM)
+4. OpenRouter — Qwen 3 235B or Llama 3.3 70B (free tier)
+
+Strategy: Try providers in rotation. If one fails (429, 5xx, timeout),
+move to the next. Rotate priority each call to spread load.
 """
 
 import os
@@ -15,13 +20,19 @@ PROVIDERS = [
         "name": "groq",
         "base_url": "https://api.groq.com/openai/v1",
         "api_key_env": "GROQ_API_KEY",
-        "model": "llama-3.3-70b-versatile",
+        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
     },
     {
         "name": "nvidia",
         "base_url": "https://integrate.api.nvidia.com/v1",
         "api_key_env": "NVIDIA_API_KEY",
-        "model": "meta/llama-3.3-70b-instruct",
+        "model": "meta/llama-4-maverick-17b-128e-instruct",
+    },
+    {
+        "name": "cerebras",
+        "base_url": "https://api.cerebras.ai/v1",
+        "api_key_env": "CEREBRAS_API_KEY",
+        "model": "llama3.1-8b",
     },
     {
         "name": "openrouter",
@@ -66,6 +77,7 @@ async def call_llm(
                         "messages": messages,
                         "temperature": temperature,
                         "max_tokens": max_tokens,
+                        "stream": False,
                     },
                 )
 
