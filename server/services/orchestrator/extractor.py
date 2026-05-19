@@ -1,66 +1,21 @@
 """
-Passive Fact Extractor — Extrait des infos d'une conversation sans que l'user s'en rende compte.
+Passive Fact Extractor — Now delegates heavy lifting to Graphiti.
 
-Utilise le LLM pour analyser chaque message et extraire :
-- skills (métier, compétences)
-- city (ville, quartier)
-- need (ce que l'user cherche)
-- frustration (problèmes rencontrés)
-- preference (ce qu'il aime/veut)
-- personal (hobbies, famille, contexte perso)
+Instead of manually extracting facts with LLM, we:
+1. Send the raw conversation episode to Graphiti (which extracts entities automatically)
+2. Only use LLM for quick intent/fact classification as a lightweight supplement
 
-Le prompt est conçu pour NE PAS halluciner : si rien de pertinent → retourne [].
+Graphiti handles: entity extraction, relationship building, temporal tracking.
+We just feed it episodes.
 """
 
 import os
-import json
+import time
 from typing import Optional
 from pydantic import BaseModel
-
 import httpx
 
-# Reuse same LLM providers as agent-orya
-PROVIDERS = [
-    {
-        "name": "groq",
-        "base_url": "https://api.groq.com/openai/v1",
-        "api_key_env": "GROQ_API_KEY",
-        "model": "llama-3.3-70b-versatile",
-    },
-    {
-        "name": "nvidia",
-        "base_url": "https://integrate.api.nvidia.com/v1",
-        "api_key_env": "NVIDIA_API_KEY",
-        "model": "meta/llama-3.3-70b-instruct",
-    },
-    {
-        "name": "openrouter",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY",
-        "model": "meta-llama/llama-3.3-70b-instruct:free",
-    },
-]
-
-EXTRACTION_PROMPT = """Tu es un extracteur d'informations. Analyse le message suivant et retourne UNIQUEMENT un JSON array avec les facts trouvées.
-
-Catégories possibles :
-- "skill" : métier, compétence, ce que la personne fait
-- "city" : ville, quartier, zone géographique
-- "need" : ce que la personne cherche (un service, un pro...)
-- "frustration" : un problème, une galère mentionnée
-- "preference" : un goût, une préférence exprimée
-- "personal" : info personnelle (famille, hobby, contexte de vie)
-
-RÈGLES :
-- Si RIEN de pertinent → retourne []
-- Ne JAMAIS inventer. Extraire UNIQUEMENT ce qui est explicitement dit.
-- Confidence: 0.9 si c'est explicite, 0.6 si c'est implicite/déduit
-- Retourne UNIQUEMENT le JSON, rien d'autre.
-
-Format: [{{"kind": "...", "value": "...", "confidence": 0.X}}]
-
-Message: "{text}"
-"""
+MEMORY_URL = os.getenv("MEMORY_URL", "http://127.0.0.1:5003")
 
 
 class ExtractedFact(BaseModel):
@@ -73,103 +28,76 @@ class ExtractedFact(BaseModel):
 
 async def extract_facts(user_id: str, text: str) -> list[ExtractedFact]:
     """
-    Extract facts from a user message using LLM.
-    Returns empty list if nothing relevant found.
+    Feed the conversation to Graphiti via Memory service.
+    Graphiti automatically extracts entities and relationships.
+    
+    Returns empty list (facts are stored directly in the graph by Graphiti).
+    We still return a lightweight local extraction for immediate UI feedback.
     """
-    import time
-
-    # Skip very short messages (greetings, yes/no)
+    # Skip very short messages
     if len(text.split()) < 3:
         return []
 
-    prompt = EXTRACTION_PROMPT.format(text=text)
-    messages = [
-        {"role": "system", "content": "Tu es un extracteur JSON strict. Retourne UNIQUEMENT du JSON valide."},
-        {"role": "user", "content": prompt},
-    ]
-
-    # Try each provider
-    for provider in PROVIDERS:
-        api_key = os.getenv(provider["api_key_env"], "")
-        if not api_key:
-            continue
-
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
-                    f"{provider['base_url']}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": provider["model"],
-                        "messages": messages,
-                        "temperature": 0.1,  # Low temp for extraction
-                        "max_tokens": 300,
-                    },
-                )
-
-            if resp.status_code == 200:
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"].strip()
-
-                # Parse JSON from response
-                facts_raw = _parse_json(content)
-                if facts_raw:
-                    now = time.time()
-                    return [
-                        ExtractedFact(
-                            kind=f["kind"],
-                            value=f["value"],
-                            confidence=f.get("confidence", 0.7),
-                            source="inline",
-                            ts=now,
-                        )
-                        for f in facts_raw
-                        if f.get("kind") and f.get("value")
-                    ]
-                return []
-        except Exception as e:
-            print(f"[extractor] {provider['name']} failed: {e}")
-            continue
-
-    return []
-
-
-def _parse_json(content: str) -> Optional[list[dict]]:
-    """Try to parse JSON from LLM output, handling markdown code blocks."""
-    # Remove markdown code blocks if present
-    if "```" in content:
-        parts = content.split("```")
-        for part in parts:
-            part = part.strip()
-            if part.startswith("json"):
-                part = part[4:].strip()
-            try:
-                result = json.loads(part)
-                if isinstance(result, list):
-                    return result
-            except:
-                continue
-
-    # Direct parse
+    # Step 1: Send episode to Graphiti (this does the REAL extraction)
     try:
-        result = json.loads(content)
-        if isinstance(result, list):
-            return result
-    except:
-        pass
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(f"{MEMORY_URL}/episode", json={
+                "userId": user_id,
+                "text": text,
+                "role": "user",
+                "source": "conversation",
+            })
+    except Exception as e:
+        print(f"[extractor] failed to send episode to Graphiti: {e}")
 
-    # Try to find array in text
-    import re
-    match = re.search(r'\[.*\]', content, re.DOTALL)
-    if match:
-        try:
-            result = json.loads(match.group())
-            if isinstance(result, list):
-                return result
-        except:
-            pass
+    # Step 2: Quick local heuristic extraction for immediate UI feedback
+    # (Graphiti does the proper extraction async, this is just for speed)
+    facts = _quick_extract(text)
+    return facts
 
-    return None
+
+def _quick_extract(text: str) -> list[ExtractedFact]:
+    """
+    Fast rule-based extraction for immediate feedback.
+    Graphiti does the real work — this is just for quick UI indicators.
+    """
+    facts = []
+    text_lower = text.lower()
+    now = time.time()
+
+    # City detection (common French cities)
+    cities = ["paris", "lyon", "marseille", "toulouse", "nice", "nantes", 
+              "strasbourg", "montpellier", "bordeaux", "lille", "rennes",
+              "villeurbanne", "saint-etienne", "grenoble"]
+    for city in cities:
+        if city in text_lower:
+            facts.append(ExtractedFact(kind="city", value=city, confidence=0.9, ts=now))
+            break
+
+    # Skill detection (job keywords)
+    job_keywords = {
+        "plombier": "plomberie", "dev": "développement", "développeur": "développement",
+        "développeuse": "développement", "coiffeur": "coiffure", "coiffeuse": "coiffure",
+        "électricien": "électricité", "mécanicien": "mécanique", "boulanger": "boulangerie",
+        "graphiste": "design graphique", "photographe": "photographie",
+        "react": "React", "next.js": "Next.js", "typescript": "TypeScript",
+        "python": "Python", "frontend": "front-end", "backend": "back-end",
+    }
+    for keyword, skill in job_keywords.items():
+        if keyword in text_lower:
+            facts.append(ExtractedFact(kind="skill", value=skill, confidence=0.9, ts=now))
+
+    # Frustration/need detection
+    frustration_words = ["galère", "problème", "cherche", "besoin", "urgent", "fuite", "panne"]
+    for word in frustration_words:
+        if word in text_lower:
+            # Extract surrounding context
+            idx = text_lower.index(word)
+            start = max(0, idx - 20)
+            end = min(len(text), idx + 40)
+            context = text[start:end].strip()
+            facts.append(ExtractedFact(kind="need" if "cherche" in word or "besoin" in word else "frustration", 
+                                       value=context, confidence=0.7, ts=now))
+            break
+
+    return facts
