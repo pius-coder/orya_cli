@@ -1,0 +1,32 @@
+# ── FalkorDB Standalone ─────────────────────────────────────────────
+# Build & run FalkorDB without docker-compose.
+# Deploy this on Coolify as a standalone service.
+#
+# Usage:
+#   docker build -f Dockerfile.falkordb -t orya-falkordb .
+#   docker run -d --name falkordb -p 6379:6379 -v falkordb_data:/data orya-falkordb
+#
+# Config:
+#   - Port: 6379 (Redis protocol)
+#   - Data persisted in /data
+#   - No auth by default (add --requirepass for prod)
+
+FROM falkordb/falkordb:latest
+
+# Persist data
+VOLUME /data
+
+# Expose Redis-compatible port
+EXPOSE 6379
+
+# Health check — FalkorDB speaks Redis protocol
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+  CMD redis-cli ping | grep -q PONG || exit 1
+
+# Run with persistence enabled (AOF + RDB)
+CMD ["redis-server", \
+     "--loadmodule", "/FalkorDB/bin/linux-x64-release/src/falkordb.so", \
+     "--dir", "/data", \
+     "--appendonly", "yes", \
+     "--save", "60 1", \
+     "--protected-mode", "no"]
