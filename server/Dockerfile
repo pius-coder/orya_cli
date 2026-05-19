@@ -89,6 +89,7 @@ VOLUME /data /var/lib/postgresql/data /var/lib/neo4j/data
 # ── Supervisor config ────────────────────────────────────────────
 COPY supervisord.conf /etc/supervisor/conf.d/orya.conf
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY scripts/wait-for-neo4j.py /app/wait-for-neo4j.py
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # ── Run from /app so `agent.main:app` resolves as a package ──────
