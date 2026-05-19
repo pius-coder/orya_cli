@@ -1,29 +1,48 @@
 /**
- * Message Router — dispatches CLI events to the appropriate backend service.
+ * Message Router — dispatches CLI events to the LangGraph agent.
  *
- * Flow:
- *   CLI message → Gateway → Agent Orya (conversation response)
- *                         → Orchestrator (async extraction + background tasks)
+ * v2 simplification: a single sync call to /chat returns the persona reply
+ * plus structured facts/candidates/trace. Async events (e.g. opt-in
+ * counterpart notifications) reach the user via /internal/push.
  */
 
 import type { WSContext } from "hono/ws";
 import type { SessionManager } from "./sessions";
 
-const AGENT_ORYA_URL = process.env.AGENT_ORYA_URL || "http://localhost:5001";
-const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL || "http://localhost:5002";
+const AGENT_URL = process.env.AGENT_URL || "http://127.0.0.1:5001";
 
-export async function routeMessage(event: any, ws: WSContext, sessions: SessionManager) {
+interface ChatResponse {
+  reply: string;
+  facts: Array<{ label: string; value: string; confidence: number }>;
+  candidates: Array<{
+    user_id: string;
+    alias?: string | null;
+    summary: string;
+    score: number;
+    candidate_uuid: string;
+  }>;
+  pending_opt_in?: Record<string, unknown> | null;
+  trace?: Array<{ step: string; detail?: string | null }>;
+}
+
+export async function routeMessage(
+  event: any,
+  ws: WSContext,
+  sessions: SessionManager,
+) {
   switch (event.type) {
     case "register": {
       const userId = event.userId || `anon-${Date.now()}`;
       const alias = event.alias || userId;
       sessions.register(userId, alias, ws);
-      ws.send(JSON.stringify({
-        type: "registered",
-        userId,
-        alias,
-        addressForm: "tu", // Orya tutoie toujours — style humain
-      }));
+      ws.send(
+        JSON.stringify({
+          type: "registered",
+          userId,
+          alias,
+          addressForm: "tu",
+        }),
+      );
       console.log(`[router] registered ${userId}`);
       break;
     }
@@ -31,54 +50,89 @@ export async function routeMessage(event: any, ws: WSContext, sessions: SessionM
     case "message": {
       const session = sessions.getByWs(ws);
       if (!session) {
-        ws.send(JSON.stringify({ type: "system", level: "error", text: "Not registered" }));
+        ws.send(
+          JSON.stringify({
+            type: "system",
+            level: "error",
+            text: "Not registered",
+          }),
+        );
         return;
       }
-
-      // Send "typing" indicator immediately
       ws.send(JSON.stringify({ type: "typing", value: true }));
-
-      // 1. Call Agent Orya for conversational reply (sync)
       try {
-        const resp = await fetch(`${AGENT_ORYA_URL}/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: session.userId,
-            text: event.text,
-          }),
+        const data = await callAgent({
+          user_id: session.userId,
+          alias: session.alias,
+          text: event.text,
+          opt_in_response: event.optInResponse,
         });
-        const data = await resp.json() as any;
-
-        ws.send(JSON.stringify({ type: "typing", value: false }));
-        ws.send(JSON.stringify({ type: "reply", text: data.reply }));
-
-        // If Orya extracted facts inline, notify
-        if (data.facts?.length) {
-          for (const fact of data.facts) {
-            ws.send(JSON.stringify({ type: "fact_recorded", fact }));
-          }
-        }
+        sendChatPayload(ws, data);
       } catch (err) {
         ws.send(JSON.stringify({ type: "typing", value: false }));
-        ws.send(JSON.stringify({
-          type: "system",
-          level: "error",
-          text: "Agent Orya unreachable",
-        }));
-        console.error("[router] agent-orya error:", err);
+        ws.send(
+          JSON.stringify({
+            type: "system",
+            level: "error",
+            text: "Agent unreachable",
+          }),
+        );
+        console.error("[router] agent error:", err);
       }
+      break;
+    }
 
-      // 2. Fire & forget to Orchestrator (async extraction pipeline)
-      fireAndForget(`${ORCHESTRATOR_URL}/process`, {
-        userId: session.userId,
-        text: event.text,
+    case "opt_in_response": {
+      const session = sessions.getByWs(ws);
+      if (!session) {
+        ws.send(
+          JSON.stringify({
+            type: "system",
+            level: "error",
+            text: "Not registered",
+          }),
+        );
+        return;
+      }
+      ws.send(JSON.stringify({ type: "typing", value: true }));
+      try {
+        const data = await callAgent({
+          user_id: session.userId,
+          alias: session.alias,
+          text: event.summary || "(opt-in response)",
+          opt_in_response: {
+            opt_in_id: event.optInId,
+            decision: event.decision,
+          },
+        });
+        sendChatPayload(ws, data);
+      } catch (err) {
+        ws.send(JSON.stringify({ type: "typing", value: false }));
+        ws.send(
+          JSON.stringify({
+            type: "system",
+            level: "error",
+            text: "Agent unreachable",
+          }),
+        );
+        console.error("[router] agent error:", err);
+      }
+      break;
+    }
+
+    case "feedback": {
+      const session = sessions.getByWs(ws);
+      if (!session) return;
+      void postFeedback({
+        user_id: session.userId,
+        user_text: event.userText,
+        assistant_reply: event.assistantReply,
+        rating: event.rating,
       });
       break;
     }
 
     case "tutoyer": {
-      // Already in tu mode, acknowledge
       ws.send(JSON.stringify({ type: "address_form", from: "tu", to: "tu" }));
       break;
     }
@@ -89,16 +143,71 @@ export async function routeMessage(event: any, ws: WSContext, sessions: SessionM
     }
 
     default:
-      ws.send(JSON.stringify({ type: "system", level: "warn", text: `Unknown event: ${event.type}` }));
+      ws.send(
+        JSON.stringify({
+          type: "system",
+          level: "warn",
+          text: `Unknown event: ${event.type}`,
+        }),
+      );
   }
 }
 
-function fireAndForget(url: string, body: any) {
-  fetch(url, {
+async function callAgent(body: Record<string, unknown>): Promise<ChatResponse> {
+  const resp = await fetch(`${AGENT_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  }).catch((err) => {
-    console.warn(`[router] fire-and-forget failed: ${url}`, err.message);
   });
+  if (!resp.ok) {
+    throw new Error(`agent ${resp.status}`);
+  }
+  return (await resp.json()) as ChatResponse;
+}
+
+function sendChatPayload(ws: WSContext, data: ChatResponse) {
+  ws.send(JSON.stringify({ type: "typing", value: false }));
+  if (data.reply) {
+    ws.send(JSON.stringify({ type: "reply", text: data.reply }));
+  }
+  for (const fact of data.facts || []) {
+    ws.send(
+      JSON.stringify({
+        type: "fact_recorded",
+        label: fact.label,
+        value: fact.value,
+        confidence: fact.confidence,
+      }),
+    );
+  }
+  if (data.candidates && data.candidates.length > 0) {
+    ws.send(
+      JSON.stringify({
+        type: "candidates",
+        items: data.candidates,
+        pendingOptIn: data.pending_opt_in ?? null,
+      }),
+    );
+  }
+  for (const ev of data.trace || []) {
+    ws.send(
+      JSON.stringify({
+        type: "trace",
+        step: ev.step,
+        detail: ev.detail ?? undefined,
+      }),
+    );
+  }
+}
+
+async function postFeedback(body: Record<string, unknown>) {
+  try {
+    await fetch(`${AGENT_URL}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    console.warn("[router] feedback post failed:", err);
+  }
 }
