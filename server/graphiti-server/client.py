@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 
 from graphiti_core import Graphiti
 from graphiti_core.driver.falkordb_driver import FalkorDriver
-from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.groq_client import GroqClient
 
 from settings import get_settings
 
-logger = logging.getLogger(__name__)
+# Add agent path for shared embedder
+sys.path.insert(0, "/app/agent")
+from providers.hf_embedder import HuggingFaceEmbedder, HuggingFaceEmbedderConfig
 
-_HF_BASE_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction"
-_HF_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-_HF_DIM = 384
+logger = logging.getLogger(__name__)
 
 
 async def init_graphiti() -> Graphiti:
@@ -31,12 +31,13 @@ async def init_graphiti() -> Graphiti:
         model=s.GRAPHITI_LLM_MODEL,
         small_model=s.GRAPHITI_LLM_SMALL_MODEL,
     ))
-    embedder = OpenAIEmbedder(config=OpenAIEmbedderConfig(
-        api_key=s.HUGGINGFACE_API_KEY or "missing",
-        embedding_model=_HF_MODEL,
-        embedding_dim=_HF_DIM,
-        base_url=_HF_BASE_URL,
+
+    # Local sentence-transformers embedder (no API, no rate limits)
+    embedder = HuggingFaceEmbedder(config=HuggingFaceEmbedderConfig(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        embedding_dim=384,
     ))
+
     g = Graphiti(
         graph_driver=driver,
         llm_client=llm,
