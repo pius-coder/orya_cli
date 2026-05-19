@@ -55,6 +55,7 @@ async def init_graphiti() -> Graphiti:
             api_key=s.GROQ_API_KEY or "missing",
             model=s.GRAPHITI_LLM_MODEL,
             small_model=s.GRAPHITI_LLM_SMALL_MODEL,
+            max_tokens=8192,  # Groq limit for Llama 4 Scout
         )
     )
 

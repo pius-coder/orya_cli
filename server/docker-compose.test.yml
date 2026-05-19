@@ -1,0 +1,31 @@
+version: "3.9"
+
+# Test compose — builds the all-in-one container (supervisord manages everything)
+# FalkorDB + Postgres + Graphiti-server + Agent + Gateway in a single box.
+
+services:
+  orya:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4001:4001"   # Gateway WebSocket
+      - "5001:5001"   # Agent REST
+      - "8000:8000"   # Graphiti-server REST
+      - "6379:6379"   # FalkorDB
+      - "5432:5432"   # PostgreSQL
+    env_file:
+      - .env.test
+    volumes:
+      - falkordb_data:/data
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  falkordb_data:
+  postgres_data:

@@ -13,9 +13,9 @@ from graphiti_core.llm_client.groq_client import GroqClient
 
 from settings import get_settings
 
-# Import shared embedder from agent
-sys.path.insert(0, "/app/agent")
-from providers.hf_embedder import HuggingFaceEmbedder, HuggingFaceEmbedderConfig
+# Import the HF embedder directly (avoid triggering agent package __init__)
+sys.path.insert(0, "/app/agent/providers")
+from hf_embedder import HuggingFaceEmbedder, HuggingFaceEmbedderConfig
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,7 @@ async def init_graphiti() -> Graphiti:
         api_key=s.GROQ_API_KEY or "missing",
         model=s.GRAPHITI_LLM_MODEL,
         small_model=s.GRAPHITI_LLM_SMALL_MODEL,
+        max_tokens=8192,  # Groq limit for Llama 4 Scout
     ))
 
     embedder = HuggingFaceEmbedder(config=HuggingFaceEmbedderConfig(
