@@ -1,10 +1,13 @@
 """HuggingFace Inference API embedder (serverless, no local model).
 
-Calls the HuggingFace feature-extraction endpoint directly.
-No PyTorch, no sentence-transformers — just httpx HTTP calls.
+Uses the NEW HuggingFace router endpoint (2025+):
+  POST https://router.huggingface.co/hf-inference/models/{model}/pipeline/feature-extraction
 
-Endpoint: POST https://api-inference.huggingface.co/models/{model}
-Response format: [[float, float, ...]] for single input
+Model: ibm-granite/granite-embedding-97m-multilingual-r2
+- Multilingual (French included)
+- 384 dimensions
+- Free on HF serverless
+- Updated regularly by IBM
 """
 
 from __future__ import annotations
@@ -18,8 +21,8 @@ from graphiti_core.embedder.client import EmbedderClient, EmbedderConfig
 
 logger = logging.getLogger(__name__)
 
-_HF_API_URL = "https://api-inference.huggingface.co/models"
-_DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+_HF_ROUTER = "https://router.huggingface.co/hf-inference/models"
+_DEFAULT_MODEL = "ibm-granite/granite-embedding-97m-multilingual-r2"
 _DEFAULT_DIM = 384
 
 
@@ -30,18 +33,18 @@ class HuggingFaceEmbedderConfig(EmbedderConfig):
 
 
 class HuggingFaceEmbedder(EmbedderClient):
-    """HuggingFace serverless embedder — API calls only, no local model."""
+    """HuggingFace serverless embedder via router API."""
 
     def __init__(self, config: HuggingFaceEmbedderConfig | None = None):
         if config is None:
             config = HuggingFaceEmbedderConfig()
         self.config = config
-        self._url = f"{_HF_API_URL}/{config.model_name}"
+        self._url = f"{_HF_ROUTER}/{config.model_name}/pipeline/feature-extraction"
 
     async def create(
         self, input_data: str | list[str] | Iterable[int] | Iterable[Iterable[int]]
     ) -> list[float]:
-        """Create embedding for a single input via HF API."""
+        """Create embedding for a single input."""
         if isinstance(input_data, str):
             text = input_data.replace("\n", " ")
         elif isinstance(input_data, list) and input_data and isinstance(input_data[0], str):
@@ -58,15 +61,15 @@ class HuggingFaceEmbedder(EmbedderClient):
             resp.raise_for_status()
             data = resp.json()
 
-        # HF returns [[float,...]] for single input or [float,...] sometimes
+        # HF returns [float,...] for single input or [[float,...]] depending on model
         if isinstance(data, list):
             if isinstance(data[0], list):
                 return data[0]
             return data
-        raise TypeError(f"Unexpected HF embedding response: {type(data)}")
+        raise TypeError(f"Unexpected HF response: {type(data)}")
 
     async def create_batch(self, input_data_list: list[str]) -> list[list[float]]:
-        """Create embeddings for a batch via HF API."""
+        """Create embeddings for a batch."""
         if not input_data_list:
             return []
 
@@ -81,7 +84,6 @@ class HuggingFaceEmbedder(EmbedderClient):
             resp.raise_for_status()
             data = resp.json()
 
-        # HF returns [[float,...], [float,...], ...] for batch
-        if isinstance(data, list) and all(isinstance(d, list) for d in data):
+        if isinstance(data, list) and data and isinstance(data[0], list):
             return data
-        raise TypeError(f"Unexpected HF batch embedding response: {type(data)}")
+        raise TypeError(f"Unexpected HF batch response: {type(data)}")

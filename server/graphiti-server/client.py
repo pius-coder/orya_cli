@@ -13,7 +13,7 @@ from graphiti_core.llm_client.groq_client import GroqClient
 
 from settings import get_settings
 
-# Import shared embedder
+# Import shared embedder from agent
 sys.path.insert(0, "/app/agent")
 from providers.hf_embedder import HuggingFaceEmbedder, HuggingFaceEmbedderConfig
 
@@ -32,9 +32,8 @@ async def init_graphiti() -> Graphiti:
         small_model=s.GRAPHITI_LLM_SMALL_MODEL,
     ))
 
-    # HuggingFace API embedder (serverless, no local deps)
     embedder = HuggingFaceEmbedder(config=HuggingFaceEmbedderConfig(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_name="ibm-granite/granite-embedding-97m-multilingual-r2",
         embedding_dim=384,
         api_key=s.HUGGINGFACE_API_KEY or "missing",
     ))
