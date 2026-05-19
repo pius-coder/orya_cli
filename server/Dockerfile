@@ -88,6 +88,8 @@ VOLUME /data /var/lib/postgresql/data /var/lib/neo4j/data
 
 # ── Supervisor config ────────────────────────────────────────────
 COPY supervisord.conf /etc/supervisor/conf.d/orya.conf
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # ── Run from /app so `agent.main:app` resolves as a package ──────
 WORKDIR /app
@@ -97,4 +99,4 @@ EXPOSE 4001 8000 7474 7687
 HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
     CMD curl -fsS http://localhost:4001/health || exit 1
 
-CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/orya.conf"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
