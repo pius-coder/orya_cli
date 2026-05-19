@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  # ── Graph Database ───────────────────────────────────────────────
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - falkordb_data:/data
+    restart: unless-stopped
+
+  # ── Vector Database ──────────────────────────────────────────────
+  # Using your hosted Qdrant at qdrantorya.globalimex.online
+  # If you want local: uncomment below
+  # qdrant:
+  #   image: qdrant/qdrant:latest
+  #   ports:
+  #     - "6333:6333"
+  #   volumes:
+  #     - qdrant_data:/qdrant/storage
+
+  # ── Gateway (Hono + WebSocket) ───────────────────────────────────
+  gateway:
+    build: ./gateway
+    ports:
+      - "4001:4001"
+    env_file:
+      - .env
+    depends_on:
+      - falkordb
+    restart: unless-stopped
+
+  # ── Agent Orya (Conversation per-user) ───────────────────────────
+  agent-orya:
+    build: ./services/agent-orya
+    ports:
+      - "5001:5001"
+    env_file:
+      - .env
+    depends_on:
+      - falkordb
+    restart: unless-stopped
+
+  # ── Orchestrator (Pipeline extraction + async decisions) ─────────
+  orchestrator:
+    build: ./services/orchestrator
+    ports:
+      - "5002:5002"
+    env_file:
+      - .env
+    depends_on:
+      - falkordb
+    restart: unless-stopped
+
+  # ── Memory Service (Graphiti + FalkorDB + Qdrant) ────────────────
+  memory:
+    build: ./services/memory
+    ports:
+      - "5003:5003"
+    env_file:
+      - .env
+    depends_on:
+      - falkordb
+    restart: unless-stopped
+
+volumes:
+  falkordb_data:
