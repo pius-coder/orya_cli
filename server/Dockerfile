@@ -40,9 +40,10 @@ RUN wget -O - https://debian.neo4j.com/neotechnology.gpg.key | gpg --dearmor -o 
     apt-get update && apt-get install -y openjdk-17-jre-headless neo4j && \
     rm -rf /var/lib/apt/lists/*
 
-# Configure Neo4j: set initial password, enable auth, and listen on all interfaces
+# Configure Neo4j: set initial password, enable auth, raise auth limits, and listen on all interfaces
 RUN neo4j-admin dbms set-initial-password "orya_neo4j_password_2026" && \
     echo "dbms.security.auth_enabled=true" >> /etc/neo4j/neo4j.conf && \
+    echo "dbms.security.auth_max_failed_attempts=1000" >> /etc/neo4j/neo4j.conf && \
     echo "server.default_listen_address=0.0.0.0" >> /etc/neo4j/neo4j.conf && \
     echo "server.bolt.listen_address=0.0.0.0:7687" >> /etc/neo4j/neo4j.conf && \
     echo "server.http.listen_address=0.0.0.0:7474" >> /etc/neo4j/neo4j.conf
