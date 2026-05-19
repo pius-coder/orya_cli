@@ -20,7 +20,7 @@
 FROM falkordb/falkordb:latest AS falkordb-source
 
 # ── Stage 2: Main image ───────────────────────────────────────────
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -30,14 +30,21 @@ RUN apt-get update && apt-get install -y \
     wget \
     unzip \
     python3 \
-    python3-pip \
+    python3-venv \
     redis-server \
     redis-tools \
     supervisor \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Copy FalkorDB module from stage 1 ─────────────────────────────
+# ── Install uv (fast Python package manager) ──────────────────────
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# ── Copy FalkorDB module + Redis 8 from stage 1 ───────────────────
 COPY --from=falkordb-source /var/lib/falkordb/bin/falkordb.so /opt/falkordb/falkordb.so
+COPY --from=falkordb-source /usr/local/bin/redis-server /usr/local/bin/redis-server
+COPY --from=falkordb-source /usr/local/bin/redis-cli /usr/local/bin/redis-cli
 
 # ── Install Bun ───────────────────────────────────────────────────
 RUN curl -fsSL https://bun.sh/install | bash
@@ -49,20 +56,20 @@ COPY gateway/package.json gateway/bun.lock* ./
 RUN bun install
 COPY gateway/ .
 
-# ── Setup Python services ─────────────────────────────────────────
+# ── Setup Python services (using uv for speed) ────────────────────
 WORKDIR /app/agent-orya
 COPY services/agent-orya/requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
 COPY services/agent-orya/ .
 
 WORKDIR /app/orchestrator
 COPY services/orchestrator/requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
 COPY services/orchestrator/ .
 
 WORKDIR /app/memory
 COPY services/memory/requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
 COPY services/memory/ .
 
 # ── Data volume ───────────────────────────────────────────────────
