@@ -1,91 +1,95 @@
-# ── Orya Server — All-in-One ────────────────────────────────────────
-# Un seul conteneur avec TOUT :
-#   - FalkorDB (graph database)
-#   - Gateway (Hono/Bun WebSocket)
-#   - Agent Orya (Python/FastAPI)
-#   - Orchestrator (Python/FastAPI)
-#   - Memory Service (Python/FastAPI)
+# ── Orya v2 — All-in-One server image ──────────────────────────────
+# Single container running:
+#   - FalkorDB (graph DB, port 6379)
+#   - PostgreSQL (relational, port 5432)
+#   - Graphiti REST server (Python/FastAPI, port 8000)
+#   - Agent (Python/FastAPI + LangGraph, port 5001)
+#   - Gateway (Hono/Bun WebSocket, port 4001)
 #
 # Coolify:
 #   - Dockerfile path: server/Dockerfile
-#   - Port exposé: 4001
-#   - Variables d'env: voir .env.example
-#   - Volume: /data (FalkorDB persistence)
-#
-# Usage local:
-#   docker build -t orya-server ./server
-#   docker run -d --name orya -p 4001:4001 --env-file server/.env orya-server
+#   - Exposed port: 4001 (and optionally 8000 for Graphiti REST inspection)
+#   - Required env: see server/.env.example
+#   - Volume: /data (FalkorDB) + /var/lib/postgresql/data (Postgres)
 
-# ── Stage 1: Grab FalkorDB module from official image ──────────────
+# ── Stage 1: pull FalkorDB binaries from the official image ──────
 FROM falkordb/falkordb:latest AS falkordb-source
 
-# ── Stage 2: Main image ───────────────────────────────────────────
+# ── Stage 2: main image ─────────────────────────────────────────
 FROM ubuntu:24.04
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
-# ── System deps ────────────────────────────────────────────────────
+# System packages: Python 3.12, Postgres 16, Redis tools, Bun deps, supervisor.
 RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    unzip \
-    python3 \
-    python3-venv \
-    redis-server \
-    redis-tools \
-    supervisor \
-    libgomp1 \
+        ca-certificates \
+        curl \
+        gnupg \
+        libgomp1 \
+        postgresql \
+        postgresql-contrib \
+        python3 \
+        python3-venv \
+        redis-tools \
+        supervisor \
+        unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Install uv (fast Python package manager) ──────────────────────
+# uv (fast Python package manager)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
-# ── Copy FalkorDB module + Redis 8 from stage 1 ───────────────────
+# Bun (Gateway runtime)
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:$PATH"
+
+# FalkorDB module + redis-server + redis-cli from the official image
 COPY --from=falkordb-source /var/lib/falkordb/bin/falkordb.so /opt/falkordb/falkordb.so
 COPY --from=falkordb-source /usr/local/bin/redis-server /usr/local/bin/redis-server
 COPY --from=falkordb-source /usr/local/bin/redis-cli /usr/local/bin/redis-cli
 
-# ── Install Bun ───────────────────────────────────────────────────
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:$PATH"
+# ── PostgreSQL setup (init runs on first boot via init-postgres.sh) ──
+RUN mkdir -p /var/lib/postgresql/data \
+    && chown -R postgres:postgres /var/lib/postgresql \
+    && chmod 700 /var/lib/postgresql/data
+COPY db/init.sql /docker-entrypoint-initdb.d/init.sql
+COPY scripts/init-postgres.sh /usr/local/bin/init-postgres.sh
+RUN chmod +x /usr/local/bin/init-postgres.sh
 
-# ── Setup Gateway (Hono/Bun) ─────────────────────────────────────
+# ── Agent (LangGraph) ────────────────────────────────────────────
+WORKDIR /app/agent
+COPY agent/requirements.txt ./requirements.txt
+RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
+COPY agent/ ./
+
+# ── Graphiti REST server ─────────────────────────────────────────
+WORKDIR /app/graphiti-server
+COPY graphiti-server/requirements.txt ./requirements.txt
+RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
+COPY graphiti-server/ ./
+
+# ── Gateway (Hono/Bun) ───────────────────────────────────────────
 WORKDIR /app/gateway
-COPY gateway/package.json gateway/bun.lock* ./
+COPY gateway/package.json gateway/tsconfig.json gateway/bun.lock* ./
 RUN bun install
-COPY gateway/ .
+COPY gateway/ ./
 
-# ── Setup Python services (using uv for speed) ────────────────────
-WORKDIR /app/agent-orya
-COPY services/agent-orya/requirements.txt .
-RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
-COPY services/agent-orya/ .
-
-WORKDIR /app/orchestrator
-COPY services/orchestrator/requirements.txt .
-RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
-COPY services/orchestrator/ .
-
-WORKDIR /app/memory
-COPY services/memory/requirements.txt .
-RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
-COPY services/memory/ .
-
-# ── Data volume ───────────────────────────────────────────────────
+# ── Persistent volumes ───────────────────────────────────────────
 RUN mkdir -p /data
-VOLUME /data
+VOLUME /data /var/lib/postgresql/data
 
-# ── Supervisor config (lance tous les process) ────────────────────
+# ── Supervisor config ────────────────────────────────────────────
 COPY supervisord.conf /etc/supervisor/conf.d/orya.conf
 
-# ── Expose only the gateway port ─────────────────────────────────
-EXPOSE 4001
-
-# ── Health check ──────────────────────────────────────────────────
-HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:4001/health || exit 1
-
-# ── Start everything via supervisor ──────────────────────────────
+# ── Run from /app so `agent.main:app` resolves as a package ──────
 WORKDIR /app
+
+EXPOSE 4001 8000
+
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+    CMD curl -fsS http://localhost:4001/health || exit 1
+
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/orya.conf"]
