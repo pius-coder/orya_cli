@@ -57,7 +57,7 @@ RÈGLES :
 - Confidence: 0.9 si c'est explicite, 0.6 si c'est implicite/déduit
 - Retourne UNIQUEMENT le JSON, rien d'autre.
 
-Format: [{"kind": "...", "value": "...", "confidence": 0.X}]
+Format: [{{"kind": "...", "value": "...", "confidence": 0.X}}]
 
 Message: "{text}"
 """
