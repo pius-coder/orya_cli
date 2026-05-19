@@ -18,6 +18,8 @@ def get_settings() -> "Settings":
 
 class Settings:
     GROQ_API_KEY: str | None = os.getenv("GROQ_API_KEY")
+    OPENROUTER_API_KEY: str | None = os.getenv("OPENROUTER_API_KEY")
+    NVIDIA_API_KEY: str | None = os.getenv("NVIDIA_API_KEY")
     HUGGINGFACE_API_KEY: str | None = os.getenv("HUGGINGFACE_API_KEY")
     GRAPHITI_LLM_MODEL: str = os.getenv(
         "GRAPHITI_LLM_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"

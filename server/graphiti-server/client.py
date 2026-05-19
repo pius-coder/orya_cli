@@ -10,6 +10,7 @@ from graphiti_core import Graphiti
 from graphiti_core.driver.neo4j_driver import Neo4jDriver
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.groq_client import GroqClient
+from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 
 from settings import get_settings
 
@@ -30,12 +31,35 @@ async def init_graphiti() -> Graphiti:
         user=s.NEO4J_USER,
         password=s.NEO4J_PASSWORD,
     )
-    llm = GroqClient(config=LLMConfig(
-        api_key=s.GROQ_API_KEY or "missing",
-        model=s.GRAPHITI_LLM_MODEL,
-        small_model=s.GRAPHITI_LLM_SMALL_MODEL,
-        max_tokens=8192,  # Groq limit for Llama 4 Scout
-    ))
+    provider = os.getenv("GRAPHITI_LLM_PROVIDER", "openrouter").lower()
+
+    if provider == "openrouter":
+        logger.info("Initializing Graphiti with OpenRouter OpenAIGenericClient...")
+        llm = OpenAIGenericClient(
+            config=LLMConfig(
+                api_key=s.OPENROUTER_API_KEY or "missing",
+                base_url="https://openrouter.ai/api/v1",
+                model=s.GRAPHITI_LLM_MODEL,
+            )
+        )
+    elif provider == "nvidia":
+        logger.info("Initializing Graphiti with NVIDIA OpenAIGenericClient...")
+        llm = OpenAIGenericClient(
+            config=LLMConfig(
+                api_key=s.NVIDIA_API_KEY or "missing",
+                base_url="https://integrate.api.nvidia.com/v1",
+                model=s.GRAPHITI_LLM_MODEL,
+            )
+        )
+    else:
+        logger.info("Initializing Graphiti with native GroqClient...")
+        llm = GroqClient(
+            config=LLMConfig(
+                api_key=s.GROQ_API_KEY or "missing",
+                model=s.GRAPHITI_LLM_MODEL,
+                small_model=s.GRAPHITI_LLM_SMALL_MODEL,
+            )
+        )
 
     embedder = HuggingFaceEmbedder(config=HuggingFaceEmbedderConfig(
         model_name="ibm-granite/granite-embedding-97m-multilingual-r2",

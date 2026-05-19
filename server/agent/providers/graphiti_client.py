@@ -13,6 +13,7 @@ from graphiti_core import Graphiti
 from graphiti_core.driver.neo4j_driver import Neo4jDriver
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.groq_client import GroqClient
+from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 
 from ..settings import get_settings
 from .embedder import build_embedder
@@ -44,19 +45,35 @@ async def init_graphiti() -> Graphiti:
         password=s.NEO4J_PASSWORD,
     )
 
-    if not s.GROQ_API_KEY:
-        logger.warning(
-            "GROQ_API_KEY not set — Graphiti entity extraction will fail."
-        )
+    provider = os.getenv("GRAPHITI_LLM_PROVIDER", "openrouter").lower()
 
-    llm_client = GroqClient(
-        config=LLMConfig(
-            api_key=s.GROQ_API_KEY or "missing",
-            model=s.GRAPHITI_LLM_MODEL,
-            small_model=s.GRAPHITI_LLM_SMALL_MODEL,
-            max_tokens=8192,  # Groq limit for Llama 4 Scout
+    if provider == "openrouter":
+        logger.info("Initializing Graphiti with OpenRouter OpenAIGenericClient...")
+        llm_client = OpenAIGenericClient(
+            config=LLMConfig(
+                api_key=s.OPENROUTER_API_KEY or "missing",
+                base_url="https://openrouter.ai/api/v1",
+                model=s.GRAPHITI_LLM_MODEL,
+            )
         )
-    )
+    elif provider == "nvidia":
+        logger.info("Initializing Graphiti with NVIDIA OpenAIGenericClient...")
+        llm_client = OpenAIGenericClient(
+            config=LLMConfig(
+                api_key=s.NVIDIA_API_KEY or "missing",
+                base_url="https://integrate.api.nvidia.com/v1",
+                model=s.GRAPHITI_LLM_MODEL,
+            )
+        )
+    else:
+        logger.info("Initializing Graphiti with native GroqClient...")
+        llm_client = GroqClient(
+            config=LLMConfig(
+                api_key=s.GROQ_API_KEY or "missing",
+                model=s.GRAPHITI_LLM_MODEL,
+                small_model=s.GRAPHITI_LLM_SMALL_MODEL,
+            )
+        )
 
     embedder = build_embedder()
 
