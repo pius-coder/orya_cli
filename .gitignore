@@ -6,3 +6,18 @@ node_modules
 .DS_Store
 .bun
 server/.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Editors
+.vscode/
+.idea/
