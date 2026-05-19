@@ -1,7 +1,7 @@
 version: "3.9"
 
 # Test compose — builds the all-in-one container (supervisord manages everything)
-# FalkorDB + Postgres + Graphiti-server + Agent + Gateway in a single box.
+# Neo4j + Postgres + Graphiti-server + Agent + Gateway in a single box.
 
 services:
   orya:
@@ -12,12 +12,13 @@ services:
       - "4001:4001"   # Gateway WebSocket
       - "5001:5001"   # Agent REST
       - "8000:8000"   # Graphiti-server REST
-      - "6379:6379"   # FalkorDB
+      - "7474:7474"   # Neo4j HTTP Browser
+      - "7687:7687"   # Neo4j Bolt
       - "5432:5432"   # PostgreSQL
     env_file:
       - .env.test
     volumes:
-      - falkordb_data:/data
+      - neo4j_data:/var/lib/neo4j/data
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
@@ -27,5 +28,5 @@ services:
       retries: 5
 
 volumes:
-  falkordb_data:
+  neo4j_data:
   postgres_data:

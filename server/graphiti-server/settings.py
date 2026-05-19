@@ -29,5 +29,6 @@ class Settings:
     GRAPHITI_TELEMETRY_ENABLED: str = os.getenv(
         "GRAPHITI_TELEMETRY_ENABLED", "false"
     )
-    FALKORDB_HOST: str = os.getenv("FALKORDB_HOST", "127.0.0.1")
-    FALKORDB_PORT: str = os.getenv("FALKORDB_PORT", "6379")
+    NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687")
+    NEO4J_USER: str = os.getenv("NEO4J_USER", "neo4j")
+    NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "")

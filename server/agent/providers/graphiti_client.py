@@ -10,7 +10,7 @@ import logging
 import os
 
 from graphiti_core import Graphiti
-from graphiti_core.driver.falkordb_driver import FalkorDriver
+from graphiti_core.driver.neo4j_driver import Neo4jDriver
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.groq_client import GroqClient
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 async def init_graphiti() -> Graphiti:
-    """Build and initialize a Graphiti instance bound to FalkorDB.
+    """Build and initialize a Graphiti instance bound to Neo4j.
 
     - Uses Groq via the native `GroqClient` for entity/edge extraction.
     - Uses HuggingFace via the OpenAI-compatible `OpenAIEmbedder` for
@@ -38,11 +38,10 @@ async def init_graphiti() -> Graphiti:
     os.environ.setdefault("SEMAPHORE_LIMIT", str(s.SEMAPHORE_LIMIT))
     os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", s.GRAPHITI_TELEMETRY_ENABLED)
 
-    driver = FalkorDriver(
-        host=s.FALKORDB_HOST,
-        port=s.FALKORDB_PORT,
-        username=None,
-        password=None,
+    driver = Neo4jDriver(
+        uri=s.NEO4J_URI,
+        user=s.NEO4J_USER,
+        password=s.NEO4J_PASSWORD,
     )
 
     if not s.GROQ_API_KEY:
@@ -71,8 +70,8 @@ async def init_graphiti() -> Graphiti:
     # Idempotent — only creates indices if missing.
     try:
         await graphiti.build_indices_and_constraints()
-        logger.info("Graphiti indices ready (FalkorDB %s:%s).",
-                    s.FALKORDB_HOST, s.FALKORDB_PORT)
+        logger.info("Graphiti indices ready (Neo4j %s).",
+                    s.NEO4J_URI)
     except Exception:  # pragma: no cover — boot-time best-effort
         logger.exception("Failed to build Graphiti indices.")
         raise

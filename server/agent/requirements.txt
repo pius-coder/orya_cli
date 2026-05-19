@@ -21,8 +21,8 @@ langgraph>=0.5
 langgraph-checkpoint-postgres>=2.0
 psycopg[binary,pool]>=3.2
 
-# Graphiti (knowledge graph) with FalkorDB driver
-graphiti-core[falkordb]>=0.11
+# Graphiti (knowledge graph) with Neo4j driver
+graphiti-core>=0.11
 
 # LangSmith (auto-traces LangChain & LangGraph when env vars set)
 langsmith>=0.2

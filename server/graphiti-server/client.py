@@ -7,7 +7,7 @@ import os
 import sys
 
 from graphiti_core import Graphiti
-from graphiti_core.driver.falkordb_driver import FalkorDriver
+from graphiti_core.driver.neo4j_driver import Neo4jDriver
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.groq_client import GroqClient
 
@@ -25,7 +25,11 @@ async def init_graphiti() -> Graphiti:
     os.environ.setdefault("SEMAPHORE_LIMIT", str(s.SEMAPHORE_LIMIT))
     os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", s.GRAPHITI_TELEMETRY_ENABLED)
 
-    driver = FalkorDriver(host=s.FALKORDB_HOST, port=s.FALKORDB_PORT)
+    driver = Neo4jDriver(
+        uri=s.NEO4J_URI,
+        user=s.NEO4J_USER,
+        password=s.NEO4J_PASSWORD,
+    )
     llm = GroqClient(config=LLMConfig(
         api_key=s.GROQ_API_KEY or "missing",
         model=s.GRAPHITI_LLM_MODEL,
