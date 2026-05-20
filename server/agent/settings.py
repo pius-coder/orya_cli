@@ -85,6 +85,11 @@ class Settings:
     )
     OPT_IN_TTL_HOURS: int = int(os.getenv("OPT_IN_TTL_HOURS", "72"))
 
+    # === v3: Reflection settings ===
+    REFLECTION_INTERVAL_TURNS: int = int(os.getenv("REFLECTION_INTERVAL_TURNS", "5"))
+    MANIFESTS_DIR: str = os.getenv("MANIFESTS_DIR", "")
+    HF_API_TIMEOUT: float = float(os.getenv("HF_API_TIMEOUT", "3.0"))
+
     # === LangSmith (auto if set) ===
     LANGSMITH_TRACING: str = os.getenv("LANGSMITH_TRACING", "false")
     LANGSMITH_API_KEY: str | None = os.getenv("LANGSMITH_API_KEY")

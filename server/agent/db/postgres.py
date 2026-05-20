@@ -288,3 +288,46 @@ async def list_pending_opt_ins(user_id: str) -> list[dict[str, Any]]:
             user_id,
         )
         return [dict(r) for r in rows]
+
+
+# ============================================================
+# Reflections (v3)
+# ============================================================
+
+
+async def get_reflections(user_id: str) -> tuple[str | None, str | None]:
+    """Load user_reflection and orya_reflection for a user."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT user_reflection, orya_reflection
+            FROM orya.reflections
+            WHERE user_id = $1
+            """,
+            user_id,
+        )
+        if not row:
+            return None, None
+        return row["user_reflection"], row["orya_reflection"]
+
+
+async def save_reflections(
+    user_id: str, user_reflection: str | None, orya_reflection: str | None
+) -> None:
+    """Upsert reflection documents."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO orya.reflections (user_id, user_reflection, orya_reflection)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id) DO UPDATE
+                SET user_reflection = COALESCE(EXCLUDED.user_reflection, orya.reflections.user_reflection),
+                    orya_reflection = COALESCE(EXCLUDED.orya_reflection, orya.reflections.orya_reflection),
+                    updated_at = now()
+            """,
+            user_id,
+            user_reflection,
+            orya_reflection,
+        )

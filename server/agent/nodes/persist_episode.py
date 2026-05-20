@@ -47,8 +47,15 @@ def make_persist_episode_node(graphiti: Graphiti):
                     edge_types=EDGE_TYPES,
                     edge_type_map=EDGE_TYPE_MAP,
                 )
+                # Run the background orchestrator for matching
+                from ..orchestrator import run_background_orchestrator
+                await run_background_orchestrator(
+                    user_id=user_id,
+                    last_user_text=user_text,
+                    graphiti=graphiti,
+                )
             except Exception:
-                logger.exception("Graphiti.add_episode failed for user=%s", user_id)
+                logger.exception("Graphiti.add_episode or orchestrator failed for user=%s", user_id)
 
         asyncio.create_task(_ingest())
         return {"trace": _append_trace(state, "persist_episode", "queued")}

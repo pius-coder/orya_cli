@@ -57,6 +57,7 @@ const C = {
 // ── Connection ────────────────────────────────────────────────────
 let lastCandidates: Candidate[] = [];
 let lastSessionId = "";
+let lastPendingOptInId: string | null = null;
 /** Timestamp of the last user message sent. Set when the CLI sends a
  * "message" event, cleared when the first reply arrives or turn.done. */
 let turnStartedAt: number | null = null;
@@ -144,24 +145,33 @@ function render(ev: ServerEvent): void {
     }
 
     case "candidates": {
-      lastCandidates = ev.candidates;
-      lastSessionId = ev.sessionId;
-      console.log(C.bold(C.mag(`📇 ${ev.candidates.length} prestataire${ev.candidates.length > 1 ? "s" : ""} (tour ${ev.tour})`)));
-      ev.candidates.forEach((c, i) => {
-        const score = (c.scoreFused * 100).toFixed(0);
-        console.log(C.mag(` ${i + 1}. `) + C.bold(c.alias) + C.dim(`  score=${score}%`));
-        console.log(C.dim(`    ${c.bio}`));
-        console.log(C.dim(`    skills: ${c.skills.join(", ")}  ·  ville: ${c.city}`));
+      const candidates = ev.items ?? (ev as any).candidates ?? [];
+      lastCandidates = candidates;
+      lastSessionId = (ev as any).sessionId ?? "";
+      if (!candidates.length) {
+        console.log(C.dim("[système] Recherche de candidats lancée mais aucun résultat."));
+        break;
+      }
+      console.log(C.bold(C.mag(`📇 ${candidates.length} prestataire${candidates.length > 1 ? "s" : ""} (tour ${(ev as any).tour ?? 1})`)));
+      candidates.forEach((c: any, i: number) => {
+        const score = ((c.score ?? c.scoreFused ?? 0) * 100).toFixed(0);
+        console.log(C.mag(` ${i + 1}. `) + C.bold(c.alias ?? c.user_id ?? "?") + C.dim(`  score=${score}%`));
+        console.log(C.dim(`    ${c.summary ?? c.bio ?? ""}`));
+        if (c.skills) console.log(C.dim(`    skills: ${(c.skills ?? []).join(", ")}  ·  ville: ${c.city ?? "?"}`));
       });
       console.log(C.dim("Réponds avec le numéro (ou /pick N) pour choisir."));
       break;
     }
 
-    case "system":
+    case "system": {
       console.log(
         (ev.level === "error" ? C.red : ev.level === "warn" ? C.yel : C.dim)(`[${ev.level}] ${ev.text}`),
       );
+      if ((ev as any).opt_in_id) {
+        lastPendingOptInId = (ev as any).opt_in_id;
+      }
       break;
+    }
 
     case "trace":
       if (ev.node === "turn.done") {
@@ -212,6 +222,26 @@ rl.on("line", (raw) => {
   if (text.startsWith("/")) {
     handleCommand(text);
     return;
+  }
+
+  // Intercept yes/no answers for pending opt-in requests
+  if (lastPendingOptInId) {
+    const lower = text.toLowerCase();
+    if (lower === "oui" || lower === "non" || lower === "y" || lower === "n" || lower === "o") {
+      const decision = (lower === "oui" || lower === "y" || lower === "o") ? "accept" : "reject";
+      const ev = {
+        type: "opt_in_response",
+        optInId: lastPendingOptInId,
+        decision: decision,
+        summary: text,
+      };
+      lastPendingOptInId = null; // consume
+      turnStartedAt = Date.now();
+      firstReplyShown = false;
+      startThinking();
+      ws.send(JSON.stringify(ev));
+      return;
+    }
   }
 
   if (ws.readyState !== WebSocket.OPEN) {
@@ -265,11 +295,24 @@ function handleCommand(cmd: string) {
         prompt();
         return;
       }
-      const ev: ClientEvent = { type: "message", text: String(n) };
+      const candidate = lastCandidates[n - 1] as any;
+      const optInId = candidate.opt_in_id ?? lastSessionId;
+      if (!optInId) {
+        console.log(C.red("Pas d'ID de mise en relation trouvé pour ce candidat."));
+        prompt();
+        return;
+      }
+      const ev = {
+        type: "opt_in_response",
+        optInId: optInId,
+        decision: "accept",
+        summary: `Choix du prestataire ${candidate.alias || candidate.user_id}`
+      };
       turnStartedAt = Date.now();
       firstReplyShown = false;
       startThinking();
       ws.send(JSON.stringify(ev));
+      console.log(C.dim(`-> Validation de la proposition de mise en relation (Opt-in ID: ${optInId})...`));
       return;
     }
     case "/tutoyer": {

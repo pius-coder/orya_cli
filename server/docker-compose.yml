@@ -1,75 +1,59 @@
 version: "3.9"
 
-# Split-mode dev compose. Production deploys the all-in-one Dockerfile
-# (single container) — see Dockerfile for that path.
+# ── Environnement de Développement Hybride (Code Local, Bases Distantes) ──
+# Utilisez `docker-compose up --build` pour lancer l'environnement.
+# Les dossiers locaux sont montés dans les conteneurs pour le Hot-Reload.
+# Assurez-vous que votre fichier .env pointe vers les bases distantes (Coolify).
 
 services:
-  falkordb:
-    image: falkordb/falkordb:latest
-    ports:
-      - "6379:6379"
-      - "3000:3000"  # FalkorDB Browser
-    volumes:
-      - falkordb_data:/data
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-orya}
-      POSTGRES_USER: ${POSTGRES_USER:-orya}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orya_secret_2026}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    restart: unless-stopped
-
   graphiti-server:
     build:
       context: .
       dockerfile: Dockerfile
       target: ""
-    command: ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    # Hot-reload activé
+    command: ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     working_dir: /app/graphiti-server
     ports:
       - "8000:8000"
     env_file:
       - .env
-    depends_on:
-      - falkordb
+    volumes:
+      - ./graphiti-server:/app/graphiti-server
     restart: unless-stopped
 
   agent:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["python3", "-m", "uvicorn", "agent.main:app", "--host", "0.0.0.0", "--port", "5001"]
+    # Hot-reload activé
+    command: ["python3", "-m", "uvicorn", "agent.main:app", "--host", "0.0.0.0", "--port", "5001", "--reload"]
     working_dir: /app
     ports:
       - "5001:5001"
     env_file:
       - .env
-    depends_on:
-      - falkordb
-      - postgres
+    volumes:
+      - ./agent:/app/agent
     restart: unless-stopped
 
   gateway:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["/root/.bun/bin/bun", "src/index.ts"]
+    # Hot-reload Bun activé
+    command: ["/root/.bun/bin/bun", "run", "--hot", "src/index.ts"]
     working_dir: /app/gateway
     ports:
       - "4001:4001"
     env_file:
       - .env
+    volumes:
+      - ./gateway:/app/gateway
     depends_on:
       - agent
     restart: unless-stopped
 
 volumes:
-  falkordb_data:
-  postgres_data:
+  # Plus de volumes de données nécessaires en local
+

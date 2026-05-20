@@ -1,4 +1,4 @@
-"""Orya v2 — Agent FastAPI service.
+"""Orya v3 — Agent FastAPI service.
 
 Endpoints:
     POST /chat      — invoke the LangGraph for a user message
@@ -8,8 +8,9 @@ Endpoints:
 Lifespan:
     - Initialize Graphiti (FalkorDB)
     - Initialize PG asyncpg pool
-    - Initialize LangGraph PostgresSaver checkpointer (with `setup()`)
-    - Build & compile the graph
+    - Initialize LangGraph PostgresSaver checkpointer
+    - Initialize Manifest Registry
+    - Build & compile the v3 graph
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -25,7 +27,8 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from . import db
-from .graph import build_graph_builder
+from .graph import build_graph_builder_v3
+from .manifests.registry import ManifestRegistry
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -52,13 +55,13 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     settings = get_settings()
     settings.configure_langsmith()
 
-    logger.info("Boot: settings loaded.")
+    logger.info("Boot v3: settings loaded.")
 
     # Postgres pool
     await db.init_pool()
     logger.info("Boot: PG pool ready.")
 
-    # LangGraph checkpointer (uses raw psycopg URL)
+    # LangGraph checkpointer
     checkpointer_cm = AsyncPostgresSaver.from_conn_string(
         settings.postgres_dsn_psycopg
     )
@@ -76,19 +79,25 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     _components["graphiti"] = graphiti
     logger.info("Boot: Graphiti ready.")
 
-    # LLM (chat) and small LLM (intent classifier — same chain, smaller tokens)
+    # LLM (the main agent LLM)
     llm = build_llm()
-    small_llm = build_llm(temperature=0.0, max_tokens=128)
     _components["llm"] = llm
-    _components["small_llm"] = small_llm
 
-    # Build & compile graph
-    builder = build_graph_builder(
-        graphiti=graphiti, llm_router=llm, small_llm=small_llm
+    # Manifest registry
+    manifests_dir = Path(__file__).parent / "manifests"
+    manifests = ManifestRegistry(manifests_dir)
+    _components["manifests"] = manifests
+    logger.info("Boot: Manifests loaded (%d tasks).", len(manifests.list_tasks()))
+
+    # Build & compile v3 graph
+    builder = build_graph_builder_v3(
+        graphiti=graphiti,
+        llm=llm,
+        manifests=manifests,
     )
     graph = builder.compile(checkpointer=checkpointer)
     _components["graph"] = graph
-    logger.info("Boot: graph compiled.")
+    logger.info("Boot: v3 graph compiled.")
 
     try:
         yield
@@ -103,7 +112,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
             logger.exception("Checkpointer close failed.")
 
 
-app = FastAPI(title="Orya Agent", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Orya Agent", version="3.0.0", lifespan=lifespan)
 
 
 # ============================================================
@@ -151,9 +160,10 @@ async def chat(req: ChatRequest) -> ChatResponse:
         "user_alias": req.alias,
         "last_user_text": req.text,
         "last_assistant_reply": "",
+        "user_reflection": None,
+        "orya_reflection": None,
+        "tool_calls": [],
         "facts_context": [],
-        "extracted_facts": [],
-        "intent": None,
         "candidates": [],
         "pending_opt_in": None,
         "opt_in_response": None,
@@ -164,14 +174,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
     return ChatResponse(
         reply=final_state.get("last_assistant_reply") or "",
-        facts=[
-            {
-                "label": f["label"],
-                "value": str(f["value"]),
-                "confidence": float(f["confidence"]),
-            }
-            for f in final_state.get("extracted_facts") or []
-        ],
+        facts=[],
         candidates=[
             {
                 "user_id": c["user_id"],
@@ -281,6 +284,7 @@ def _make_opt_in_payload(
                 f"Quelqu'un cherche : '{row['need_summary']}'. Tu veux qu'on "
                 f"te mette en relation ? (réponds 'oui' ou 'non')"
             ),
+            "opt_in_id": str(row["opt_in_id"]),
         }
     if status == "matched":
         return {
@@ -288,7 +292,7 @@ def _make_opt_in_payload(
             "text": "C'est bon, vous êtes en relation. Bonne discussion !",
         }
     if status == "rejected_seeker":
-        return None  # nothing to tell the provider
+        return None
     if status == "rejected_provider":
         return {
             "type": "system",
@@ -300,4 +304,23 @@ def _make_opt_in_payload(
 # Optional debug endpoint
 @app.get("/debug/opt_ins/{user_id}")
 async def list_opt_ins(user_id: str) -> list[dict[str, Any]]:
-    return await db.list_pending_opt_ins(user_id)
+    rows = await db.list_pending_opt_ins(user_id)
+    serialized = []
+    for r in rows:
+        item = dict(r)
+        item["opt_in_id"] = str(item["opt_in_id"])
+        if item.get("expires_at"):
+            item["expires_at"] = item["expires_at"].isoformat()
+        serialized.append(item)
+    return serialized
+
+
+@app.get("/debug/reflections/{user_id}")
+async def get_user_reflections(user_id: str) -> dict[str, Any]:
+    """Debug endpoint to inspect reflection documents."""
+    user_ref, orya_ref = await db.get_reflections(user_id)
+    return {
+        "user_id": user_id,
+        "user_reflection": user_ref,
+        "orya_reflection": orya_ref,
+    }

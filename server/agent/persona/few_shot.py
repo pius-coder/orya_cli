@@ -29,6 +29,7 @@ def build_messages(
     good_examples: list[dict[str, Any]] | None = None,
     tutoyer: bool = True,
     user_alias: str | None = None,
+    user_prompt_content: str | None = None,
 ) -> list[AnyMessage]:
     """Assemble the full prompt context.
 
@@ -39,18 +40,21 @@ def build_messages(
             (rating=1) to use as positive few-shot.
         tutoyer: whether Orya tutoies (True) or vouvoies (False).
         user_alias: optional name to address.
+        user_prompt_content: dynamic user prompt formatted as XML/Markdown.
     """
 
     system = get_system_prompt(tutoyer=tutoyer)
 
-    facts_block = _format_facts(facts_context)
-    persona_addendum = (
-        f"\n\nFaits déjà connus sur la personne :\n{facts_block}"
-    )
-    if user_alias:
-        persona_addendum += f"\n\nLa personne s'appelle '{user_alias}'."
-
-    persona_addendum += "\n\n" + render_negatives(tutoyer=tutoyer)
+    if user_prompt_content:
+        persona_addendum = "\n\n" + render_negatives(tutoyer=tutoyer)
+    else:
+        facts_block = _format_facts(facts_context)
+        persona_addendum = (
+            f"\n\nFaits déjà connus sur la personne :\n{facts_block}"
+        )
+        if user_alias:
+            persona_addendum += f"\n\nLa personne s'appelle '{user_alias}'."
+        persona_addendum += "\n\n" + render_negatives(tutoyer=tutoyer)
 
     messages: list[AnyMessage] = [SystemMessage(content=system + persona_addendum)]
 
@@ -65,5 +69,10 @@ def build_messages(
                 messages.append(AIMessage(content=ar))
 
     # Then the live conversation history.
-    messages.extend(history)
+    if user_prompt_content and history and isinstance(history[-1], HumanMessage):
+        messages.extend(history[:-1])
+        messages.append(HumanMessage(content=user_prompt_content))
+    else:
+        messages.extend(history)
+        
     return messages

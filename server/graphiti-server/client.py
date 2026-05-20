@@ -15,7 +15,11 @@ from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 from settings import get_settings
 
 # Import the HF embedder directly (avoid triggering agent package __init__)
-sys.path.insert(0, "/app/agent/providers")
+# Works both inside Docker (/app/agent/providers) and locally
+_here = os.path.dirname(os.path.abspath(__file__))
+_agent_providers = os.path.join(_here, "..", "agent", "providers")
+sys.path.insert(0, os.path.normpath(_agent_providers))
+sys.path.insert(0, "/app/agent/providers")  # Docker fallback
 from hf_embedder import HuggingFaceEmbedder, HuggingFaceEmbedderConfig
 
 logger = logging.getLogger(__name__)

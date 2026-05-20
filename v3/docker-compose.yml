@@ -1,0 +1,97 @@
+version: "3.9"
+
+# Development compose: each service builds from the all-in-one Dockerfile
+# but runs only its own process with hot-reload.
+# Note: For production, use the all-in-one container with supervisord.
+
+services:
+  neo4j:
+    image: neo4j:5.26
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-orya_neo4j_password_2026}
+      NEO4J_PLUGINS: '[]'
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: orya
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orya_secret_2026}
+      POSTGRES_DB: orya
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  graphiti-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uvicorn", "graphiti-server.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./graphiti-server:/app/graphiti-server:ro
+      - ./agent:/app/agent:ro
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - POSTGRES_HOST=postgres
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+    depends_on:
+      - neo4j
+      - postgres
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uvicorn", "agent.main:app", "--host", "0.0.0.0", "--port", "5001", "--reload"]
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./agent:/app/agent:ro
+      - ./graphiti-server:/app/graphiti-server:ro
+      - ./db:/app/db:ro
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - POSTGRES_HOST=postgres
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-false}
+      - GATEWAY_INTERNAL_URL=http://gateway:4001
+    depends_on:
+      - neo4j
+      - postgres
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["bun", "--hot", "src/index.ts"]
+    working_dir: /app/gateway
+    ports:
+      - "4001:4001"
+    volumes:
+      - ./gateway:/app/gateway:ro
+    environment:
+      - GATEWAY_PORT=4001
+      - AGENT_URL=http://agent:5001
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+    depends_on:
+      - agent
+
+volumes:
+  neo4j_data:
+  pg_data:

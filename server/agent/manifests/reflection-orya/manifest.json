@@ -1,0 +1,5 @@
+{
+  "task_id": "reflection-orya",
+  "description": "Updates Orya's self-cognition from conversation history",
+  "template": "system.md"
+}

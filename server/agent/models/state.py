@@ -1,4 +1,7 @@
-"""LangGraph state schema for Orya agent."""
+"""LangGraph state schema for Orya v3 — simplified.
+
+No heavy qualifier. The Tool Agent LLM decides what to do.
+"""
 
 from __future__ import annotations
 
@@ -9,10 +12,11 @@ from langgraph.graph.message import add_messages
 
 
 class OryaState(TypedDict, total=False):
-    """Typed dict for the Orya LangGraph state.
+    """Typed dict for the Orya v3 LangGraph state.
 
-    All fields are optional at the type level (`total=False`) but most are
-    populated at graph entry by `main.py` before invocation.
+    v3 changes:
+    - reflections: user_reflection + orya_reflection documents
+    - tool_calls: record of which tools the agent decided to invoke
     """
 
     # Conversation history (managed by LangGraph reducer; survives checkpoints)
@@ -22,21 +26,21 @@ class OryaState(TypedDict, total=False):
     user_id: str
     user_alias: Optional[str]
 
-    # Convenience snapshots of last turn (for nodes that don't want to walk
-    # the whole `messages` list)
+    # Convenience snapshots of last turn
     last_user_text: str
     last_assistant_reply: str
 
-    # Memory retrieval
+    # v3: Reflection documents (loaded from PG or empty)
+    user_reflection: Optional[str]
+    orya_reflection: Optional[str]
+
+    # v3: Tool call trace (which tools the agent used)
+    tool_calls: list[dict[str, Any]]
+
+    # Memory retrieval (populated by tools or retrieve_context)
     facts_context: list[str]
 
-    # Quick-extraction (rule-based) — emitted to client for live UI feedback
-    extracted_facts: list[dict[str, Any]]
-
-    # Intent detection
-    intent: Optional[dict[str, Any]]
-
-    # Match candidates (cross-group Graphiti search)
+    # Match candidates (populated by search_providers tool)
     candidates: list[dict[str, Any]]
 
     # Active opt-in awaiting decision

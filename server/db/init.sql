@@ -100,6 +100,29 @@ CREATE TABLE IF NOT EXISTS orya.schema_version (
     applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ============================================================
+-- Reflections (v3 — user portrait + orya self-cognition)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS orya.reflections (
+    reflection_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         TEXT NOT NULL REFERENCES orya.users(user_id) ON DELETE CASCADE,
+    user_reflection TEXT,
+    orya_reflection TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (user_id)
+);
+
+CREATE INDEX IF NOT EXISTS reflections_user_id_idx ON orya.reflections (user_id);
+
+-- ============================================================
+-- Versioning row (for future migrations)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS orya.schema_version (
+    version    INT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 INSERT INTO orya.schema_version (version)
-VALUES (1)
+VALUES (2)
 ON CONFLICT (version) DO NOTHING;

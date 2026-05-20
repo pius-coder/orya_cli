@@ -162,12 +162,33 @@ async def run_simulation():
             try:
                 response = await chat(client, user_id, alias, search_text)
                 print_response(user_id, search_text, response)
-                all_candidates[user_id] = response.get("candidates", [])
+                
+                # Attendre que l'orchestrateur asynchrone tourne en tâche de fond
+                print("     (Attente de l'analyse asynchrone...)")
+                await asyncio.sleep(4)
+                
+                # Récupérer les propositions créées en base de données
+                debug_resp = await client.get(f"{AGENT_URL}/debug/opt_ins/{user_id}")
+                debug_resp.raise_for_status()
+                pending_opt_ins = debug_resp.json()
+                
+                candidates = []
+                for opt in pending_opt_ins:
+                    # Récupérer l'alias du provider
+                    prov_id = opt["provider_id"]
+                    prov_alias = USERS.get(prov_id, {}).get("alias", prov_id)
+                    candidates.append({
+                        "user_id": prov_id,
+                        "alias": prov_alias,
+                        "summary": opt["need_summary"],
+                        "score": 1.0,
+                    })
+                all_candidates[user_id] = candidates
             except Exception as e:
                 print(f"\n  ❌ ERREUR recherche {alias}: {e}")
                 all_candidates[user_id] = []
             
-            await asyncio.sleep(3)
+            await asyncio.sleep(1)
         
         # ── Phase 3: Vérification du graphe ───────────────────────
         print("\n\n" + "═" * 60)

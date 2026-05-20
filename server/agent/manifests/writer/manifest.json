@@ -1,0 +1,5 @@
+{
+  "task_id": "writer",
+  "description": "Main agent that decides tools and generates Orya's reply",
+  "template": "system.md"
+}

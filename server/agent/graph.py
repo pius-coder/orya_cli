@@ -1,73 +1,103 @@
-"""LangGraph StateGraph definition for Orya.
+"""LangGraph StateGraph definition for Orya v3 — simplified.
 
-Wires the nodes together. Compilation happens in `main.py` (so we can pass
-the live checkpointer / dependencies).
+Architecture:
+  START → retrieve_context (reflections + Graphiti) → tool_agent (LLM with tools) → persist → END
+                                                          ↓
+                                                   cold_track (fire-and-forget)
+
+Pas de Qualifier lourd. Pas de classification d'intent. L'agent LLM décide.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+import asyncio
 
 from graphiti_core import Graphiti
 from langchain_core.runnables import Runnable
 from langgraph.graph import END, START, StateGraph
 
-from .models import OryaState
-from .nodes import (
-    extract_quick_node,
-    make_detect_intent_node,
-    make_persist_episode_node,
-    make_persona_respond_node,
-    make_retrieve_context_node,
-    make_search_match_node,
-    notify_user_node,
-    opt_in_propose_node,
-)
+from agent.manifests.registry import ManifestRegistry
+from agent.models import OryaState
+from agent.nodes.v3.cold_track import run_cold_track
+from agent.nodes.v3.tool_agent import make_tool_agent_node
+from agent.tools.executor import ToolExecutor
 
 
-def _route_after_intent(state: OryaState) -> Literal["search_match", "notify_user"]:
-    intent = state.get("intent") or {}
-    if intent.get("action") == "search":
-        return "search_match"
-    return "notify_user"
-
-
-def build_graph_builder(
+def build_graph_builder_v3(
     *,
     graphiti: Graphiti,
-    llm_router: Runnable,
-    small_llm: Runnable,
+    llm: Runnable,
+    manifests: ManifestRegistry,
 ) -> StateGraph:
-    """Construct the StateGraph builder. Caller is responsible for `.compile`."""
+    """Construct the simplified Orya v3 StateGraph."""
 
     builder = StateGraph(OryaState)
+    executor = ToolExecutor(graphiti)
 
-    builder.add_node(
-        "retrieve_context", make_retrieve_context_node(graphiti)
-    )
-    builder.add_node("persona_respond", make_persona_respond_node(llm_router))
-    builder.add_node(
-        "persist_episode", make_persist_episode_node(graphiti)
-    )
-    builder.add_node("extract_quick", extract_quick_node)
-    builder.add_node("detect_intent", make_detect_intent_node(small_llm))
-    builder.add_node("search_match", make_search_match_node(graphiti))
-    builder.add_node("opt_in_propose", opt_in_propose_node)
-    builder.add_node("notify_user", notify_user_node)
+    async def retrieve_context_node(state: OryaState) -> dict:
+        """Load reflections + Graphiti facts + pending opt-ins."""
+        from agent.db import get_reflections, list_pending_opt_ins
+
+        user_id = state["user_id"]
+        text = state.get("last_user_text", "")
+
+        # 1. Reflections from PG
+        user_ref, orya_ref = await get_reflections(user_id)
+
+        # 2. Graphiti search (scoped to user) — si texte présent
+        facts: list[str] = []
+        if text:
+            try:
+                edges = await graphiti.search(
+                    query=text,
+                    group_ids=[user_id],
+                    num_results=5,
+                )
+                for edge in edges or []:
+                    fact = getattr(edge, "fact", None)
+                    if fact:
+                        facts.append(fact)
+            except Exception as e:
+                logger = __import__("logging").getLogger(__name__)
+                logger.warning("Graphiti search failed: %s", e)
+
+        # 3. Pending opt-ins
+        opt_ins = await list_pending_opt_ins(user_id)
+        if opt_ins:
+            facts.append("--- MATCHINGS EN ATTENTE ---")
+            for opt in opt_ins:
+                facts.append(
+                    f"Prestataire '{opt['provider_id']}' pour '{opt['need_summary']}'"
+                )
+            facts.append("----------------------------")
+
+        return {
+            "facts_context": facts,
+            "user_reflection": user_ref,
+            "orya_reflection": orya_ref,
+            "trace": _append_trace(state, "retrieve_context", f"{len(facts)} items loaded"),
+        }
+
+    tool_agent = make_tool_agent_node(llm, manifests, executor)
+
+    async def persist_node(state: OryaState) -> dict:
+        """Fire-and-forget background tasks then end."""
+        asyncio.create_task(run_cold_track(state, graphiti, manifests, llm))
+        return {"trace": _append_trace(state, "persist", "background tasks launched")}
+
+    builder.add_node("retrieve_context", retrieve_context_node)
+    builder.add_node("tool_agent", tool_agent)
+    builder.add_node("persist", persist_node)
 
     builder.add_edge(START, "retrieve_context")
-    builder.add_edge("retrieve_context", "persona_respond")
-    builder.add_edge("persona_respond", "persist_episode")
-    builder.add_edge("persist_episode", "extract_quick")
-    builder.add_edge("extract_quick", "detect_intent")
-
-    builder.add_conditional_edges(
-        "detect_intent",
-        _route_after_intent,
-        {"search_match": "search_match", "notify_user": "notify_user"},
-    )
-    builder.add_edge("search_match", "opt_in_propose")
-    builder.add_edge("opt_in_propose", "notify_user")
-    builder.add_edge("notify_user", END)
+    builder.add_edge("retrieve_context", "tool_agent")
+    builder.add_edge("tool_agent", "persist")
+    builder.add_edge("persist", END)
 
     return builder
+
+
+def _append_trace(state: OryaState, step: str, detail: str) -> list[dict]:
+    existing = list(state.get("trace") or [])
+    existing.append({"step": step, "detail": detail})
+    return existing

@@ -19,7 +19,7 @@ from ..persona import build_messages
 logger = logging.getLogger(__name__)
 
 
-def make_persona_respond_node(llm: Runnable):
+def make_persona_respond_node(llm: Runnable, small_llm: Runnable | None = None):
     async def persona_respond_node(state: OryaState) -> dict[str, Any]:
         user_id = state["user_id"]
         # Make sure the latest human turn is in messages
@@ -46,12 +46,24 @@ def make_persona_respond_node(llm: Runnable):
         except Exception:
             good = []
 
+        # Build dynamic user context prompt block under XML/Markdown structure
+        from ..persona.user_prompt import build_user_prompt
+        user_prompt_content = await build_user_prompt(
+            user_id=user_id,
+            user_alias=alias,
+            last_user_text=last_text,
+            facts_context=state.get("facts_context") or [],
+            history=history,
+            tutoyer=tutoyer,
+        )
+
         prompt_messages = build_messages(
             history=history,
             facts_context=state.get("facts_context") or [],
             good_examples=good,
             tutoyer=tutoyer,
             user_alias=alias,
+            user_prompt_content=user_prompt_content,
         )
 
         try:

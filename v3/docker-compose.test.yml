@@ -1,0 +1,31 @@
+version: "3.9"
+
+# Test compose: single all-in-one container with supervisord.
+# Neo4j and PostgreSQL run inside the same container.
+
+services:
+  orya:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4001:4001"
+      - "5001:5001"
+      - "8000:8000"
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/var/lib/neo4j/data
+      - pg_data:/var/lib/postgresql/data
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  neo4j_data:
+  pg_data:
