@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 async def cross_user_match_node(state: OryaState, embedder: HuggingFaceEmbedder | None = None) -> dict[str, Any]:
     user_id = state.get("user_id", "")
-    query = state.get("match_query", "")
+    query = state.get("match_query") or state.get("last_user_text", "")
 
     if not query:
         trace = append_trace(state, "cross_user_match", "no query")

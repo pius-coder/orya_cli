@@ -12,8 +12,8 @@ from typing import Any
 import httpx
 from graphiti_core import Graphiti
 
-from ..core.config import get_settings
-from ..db import create_opt_in, get_user
+from .core.config import get_settings
+from .db import create_opt_in, get_user
 
 logger = logging.getLogger(__name__)
 

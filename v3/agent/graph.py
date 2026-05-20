@@ -1,8 +1,11 @@
 """LangGraph StateGraph builder for Orya v3 with MemBrain.
 
-Updated to pass embedder to nodes that need it.
+All async node wrappers are defined as named inner functions
+so LangGraph can schedule them correctly (lambdas would return
+coroutine objects instead of awaiting them).
 """
 import logging
+from typing import Any
 
 from graphiti_core import Graphiti
 from langchain_core.runnables import Runnable
@@ -22,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 
 def _conditional_match(state: OryaState) -> str:
-    if state.get("match_query"):
+    """Route to cross_user_match if strategy == 'match', else tool_agent."""
+    if state.get("strategy") == "match":
         return "cross_user_match"
     return "tool_agent"
 
@@ -37,11 +41,19 @@ def build_graph(
     """Compile and return the Orya v3+MemBrain LangGraph."""
     executor = ToolExecutor(graphiti)
 
+    # ── Async wrappers (not lambdas) so LangGraph awaits them ──────
+
+    async def _memory_router(state: OryaState) -> dict[str, Any]:
+        return await memory_router_node(state, llm)
+
+    async def _cross_user_match(state: OryaState) -> dict[str, Any]:
+        return await cross_user_match_node(state, embedder)
+
     graph = StateGraph(OryaState)
 
-    graph.add_node("memory_router", lambda state: memory_router_node(state, llm))
+    graph.add_node("memory_router", _memory_router)
     graph.add_node("retrieve_context", make_retrieve_context_node(graphiti))
-    graph.add_node("cross_user_match", lambda state: cross_user_match_node(state, embedder))
+    graph.add_node("cross_user_match", _cross_user_match)
     graph.add_node("tool_agent", make_tool_agent_node(llm, manifests, executor))
     graph.add_node("persist_and_match", make_persist_and_match_node(graphiti, llm, embedder))
 

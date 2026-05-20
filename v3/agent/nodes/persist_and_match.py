@@ -14,7 +14,7 @@ from graphiti_core import EpisodeType, Graphiti
 from ..core.config import get_settings
 from ..core.trace import append_trace
 from ..db import get_user, save_reflections
-from ..matching import run_background_matching
+from ..matching_engine import run_background_matching
 from ..memory import ingest_conversation
 from ..models import OryaState
 from ..models.entities import EDGE_TYPE_MAP, EDGE_TYPES, ENTITY_TYPES

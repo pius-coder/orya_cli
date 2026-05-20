@@ -6,8 +6,9 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA IF NOT EXISTS orya;
 
 -- ── Users ─────────────────────────────────────────────────────────
+-- VARCHAR(128) to support CLI-generated IDs like "marc_001"
 CREATE TABLE IF NOT EXISTS orya.users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id VARCHAR(128) PRIMARY KEY,
     alias VARCHAR(100) NOT NULL,
     graphiti_node_uuid VARCHAR(100),
     tutoyer BOOLEAN DEFAULT true,
@@ -17,7 +18,7 @@ CREATE TABLE IF NOT EXISTS orya.users (
 -- ── Sessions ──────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS orya.sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES orya.users(id) ON DELETE CASCADE,
+    user_id VARCHAR(128) REFERENCES orya.users(id) ON DELETE CASCADE,
     started_at TIMESTAMPTZ DEFAULT NOW(),
     last_message_at TIMESTAMPTZ,
     message_count INT DEFAULT 0
@@ -26,7 +27,7 @@ CREATE TABLE IF NOT EXISTS orya.sessions (
 -- ── Feedback (few-shot dynamique) ─────────────────────────────────
 CREATE TABLE IF NOT EXISTS orya.feedback (
     id SERIAL PRIMARY KEY,
-    user_id UUID REFERENCES orya.users(id) ON DELETE CASCADE,
+    user_id VARCHAR(128) REFERENCES orya.users(id) ON DELETE CASCADE,
     user_input TEXT NOT NULL,
     orya_response TEXT NOT NULL,
     rating VARCHAR(10) NOT NULL CHECK (rating IN ('good', 'bad')),
@@ -51,8 +52,8 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS orya.opt_ins (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    seeker_id UUID REFERENCES orya.users(id) ON DELETE CASCADE,
-    provider_id UUID REFERENCES orya.users(id) ON DELETE CASCADE,
+    seeker_id VARCHAR(128) REFERENCES orya.users(id) ON DELETE CASCADE,
+    provider_id VARCHAR(128) REFERENCES orya.users(id) ON DELETE CASCADE,
     candidate_uuid VARCHAR(100),
     reason TEXT,
     status orya.opt_in_status DEFAULT 'pending_seeker',
@@ -69,7 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_opt_ins_status ON orya.opt_ins(status);
 
 -- ── Reflections (mémoire long terme textuelle) ────────────────────
 CREATE TABLE IF NOT EXISTS orya.reflections (
-    user_id UUID PRIMARY KEY REFERENCES orya.users(id) ON DELETE CASCADE,
+    user_id VARCHAR(128) PRIMARY KEY REFERENCES orya.users(id) ON DELETE CASCADE,
     user_reflection TEXT,
     orya_reflection TEXT,
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -173,5 +174,5 @@ CREATE TABLE IF NOT EXISTS orya.schema_version (
     applied_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-INSERT INTO orya.schema_version (version) VALUES (4)
+INSERT INTO orya.schema_version (version) VALUES (5)
 ON CONFLICT (version) DO NOTHING;

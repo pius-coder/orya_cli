@@ -1,8 +1,9 @@
 """LangGraph state definition for Orya v3.
 
-Cleaned up from v2: removes ambiguity between v2 and v3 state shapes.
-Uses total=True for stronger type safety within nodes.
+Each key a node returns must be declared here.
+Annotated fields use operator.add as reducer (append semantics).
 """
+import operator
 from typing import Annotated, Any, Optional, TypedDict
 
 from langchain_core.messages import AnyMessage
@@ -18,18 +19,22 @@ class OryaState(TypedDict):
     last_user_text: str
     last_assistant_reply: str
 
+    # Routing
+    strategy: str
+    match_query: str
+
     # Memory
     user_reflection: Optional[str]
     orya_reflection: Optional[str]
     facts_context: Optional[str]
 
     # Tooling
-    tool_calls: Annotated[list[dict[str, Any]], list]
-    candidates: Annotated[list[dict[str, Any]], list]
+    tool_calls: Annotated[list[dict[str, Any]], operator.add]
+    candidates: Annotated[list[dict[str, Any]], operator.add]
 
     # Matching
     pending_opt_in: Optional[dict[str, Any]]
     opt_in_response: Optional[dict[str, Any]]
 
     # Observability
-    trace: Annotated[list[dict[str, str]], list]
+    trace: Annotated[list[dict[str, str]], operator.add]

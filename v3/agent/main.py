@@ -29,44 +29,43 @@ async def lifespan(app: FastAPI):
     settings.configure_langsmith()
 
     await db.init_pool()
-    checkpointer = AsyncPostgresSaver.from_conn_string(settings.postgres_dsn_psycopg)
-    await checkpointer.alist()
-    graphiti = await init_graphiti()
-    llm = build_llm()
+    async with AsyncPostgresSaver.from_conn_string(settings.postgres_dsn_psycopg) as checkpointer:
+        await checkpointer.setup()
+        graphiti = await init_graphiti()
+        llm = build_llm()
 
-    # MemBrain embedder
-    embedder = HuggingFaceEmbedder(
-        config=HuggingFaceEmbedderConfig(
-            api_key=settings.HUGGINGFACE_API_KEY,
-            embedding_model="sentence-transformers/all-MiniLM-L6-v2",
-            embedding_dim=384,
+        # MemBrain embedder
+        embedder = HuggingFaceEmbedder(
+            config=HuggingFaceEmbedderConfig(
+                api_key=settings.HUGGINGFACE_API_KEY,
+                embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+                embedding_dim=384,
+            )
         )
-    )
 
-    import pathlib
+        import pathlib
 
-    manifests_dir = pathlib.Path(__file__).parent / "manifests"
-    manifests = ManifestRegistry(str(manifests_dir))
-    graph = build_graph(graphiti=graphiti, llm=llm, manifests=manifests, embedder=embedder)
+        manifests_dir = pathlib.Path(__file__).parent / "manifests"
+        manifests = ManifestRegistry(str(manifests_dir))
+        graph = build_graph(graphiti=graphiti, llm=llm, manifests=manifests, embedder=embedder)
 
-    _components.update(
-        {
-            "settings": settings,
-            "pool": db.get_pool(),
-            "checkpointer": checkpointer,
-            "graphiti": graphiti,
-            "llm": llm,
-            "embedder": embedder,
-            "manifests": manifests,
-            "graph": graph,
-        }
-    )
+        _components.update(
+            {
+                "settings": settings,
+                "pool": db.get_pool(),
+                "checkpointer": checkpointer,
+                "graphiti": graphiti,
+                "llm": llm,
+                "embedder": embedder,
+                "manifests": manifests,
+                "graph": graph,
+            }
+        )
 
-    logger.info("Orya agent v3+MemBrain started")
-    yield
+        logger.info("Orya agent v3+MemBrain started")
+        yield
 
     await db.close_pool()
-    await checkpointer.aclose()
     logger.info("Orya agent v3+MemBrain shutdown")
 
 
@@ -103,6 +102,15 @@ async def chat(req: ChatRequest) -> ChatResponse:
         "user_alias": req.alias,
         "last_user_text": req.text,
         "last_assistant_reply": "",
+        "strategy": "chat",
+        "match_query": "",
+        "user_reflection": None,
+        "orya_reflection": None,
+        "facts_context": None,
+        "tool_calls": [],
+        "candidates": [],
+        "pending_opt_in": None,
+        "opt_in_response": None,
         "trace": [],
     }
 
