@@ -37,14 +37,17 @@ CREATE INDEX IF NOT EXISTS idx_feedback_user ON orya.feedback(user_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_rating ON orya.feedback(rating);
 
 -- ── Double Opt-In ─────────────────────────────────────────────────
-CREATE TYPE IF NOT EXISTS orya.opt_in_status AS ENUM (
-    'pending_seeker',
-    'pending_provider',
-    'both_accepted',
-    'declined_seeker',
-    'declined_provider',
-    'expired'
-);
+DO $$ BEGIN
+    CREATE TYPE orya.opt_in_status AS ENUM (
+        'pending_seeker',
+        'pending_provider',
+        'both_accepted',
+        'declined_seeker',
+        'declined_provider',
+        'expired'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS orya.opt_ins (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -123,9 +126,9 @@ CREATE TABLE IF NOT EXISTS orya.mb_entity_trees (
     description TEXT,
     support INT DEFAULT 0,
     fresh_count INT DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(user_id, entity_id, fact_id) WHERE fact_id IS NOT NULL
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mb_trees_unique_leaf ON orya.mb_entity_trees(user_id, entity_id, fact_id) WHERE (fact_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_mb_trees_user_entity ON orya.mb_entity_trees(user_id, entity_id);
 CREATE INDEX IF NOT EXISTS idx_mb_trees_parent ON orya.mb_entity_trees(parent_id);
 
