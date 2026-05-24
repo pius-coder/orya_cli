@@ -1,0 +1,5 @@
+{
+  "task_id": "qualifier",
+  "name": "Qualifier",
+  "description": "Classifies user intent, emotion, and extracts key entities from a message."
+}

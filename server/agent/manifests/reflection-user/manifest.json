@@ -1,0 +1,5 @@
+{
+  "task_id": "reflection-user",
+  "description": "Updates user portrait from conversation history",
+  "template": "system.md"
+}

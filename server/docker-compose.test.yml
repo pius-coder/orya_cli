@@ -1,0 +1,32 @@
+version: "3.9"
+
+# Test compose — builds the all-in-one container (supervisord manages everything)
+# Neo4j + Postgres + Graphiti-server + Agent + Gateway in a single box.
+
+services:
+  orya:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4001:4001"   # Gateway WebSocket
+      - "5001:5001"   # Agent REST
+      - "8000:8000"   # Graphiti-server REST
+      - "7474:7474"   # Neo4j HTTP Browser
+      - "7687:7687"   # Neo4j Bolt
+      - "5432:5432"   # PostgreSQL
+    env_file:
+      - .env.test
+    volumes:
+      - neo4j_data:/var/lib/neo4j/data
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  neo4j_data:
+  postgres_data:

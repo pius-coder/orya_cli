@@ -1,0 +1,5 @@
+{
+  "task_id": "qualifier",
+  "description": "HF-based intent/emotion/entity classification",
+  "template": "system.md"
+}

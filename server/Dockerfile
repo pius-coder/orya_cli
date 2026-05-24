@@ -1,91 +1,103 @@
-# ── Orya Server — All-in-One ────────────────────────────────────────
-# Un seul conteneur avec TOUT :
-#   - FalkorDB (graph database)
-#   - Gateway (Hono/Bun WebSocket)
-#   - Agent Orya (Python/FastAPI)
-#   - Orchestrator (Python/FastAPI)
-#   - Memory Service (Python/FastAPI)
+# ── Orya v2 — All-in-One server image ──────────────────────────────
+# Single container running:
+#   - Neo4j Community Server (graph DB, port 7687 Bolt, port 7474 HTTP)
+#   - PostgreSQL (relational, port 5432)
+#   - Graphiti REST server (Python/FastAPI, port 8000)
+#   - Agent (Python/FastAPI + LangGraph, port 5001)
+#   - Gateway (Hono/Bun WebSocket, port 4001)
 #
 # Coolify:
 #   - Dockerfile path: server/Dockerfile
-#   - Port exposé: 4001
-#   - Variables d'env: voir .env.example
-#   - Volume: /data (FalkorDB persistence)
-#
-# Usage local:
-#   docker build -t orya-server ./server
-#   docker run -d --name orya -p 4001:4001 --env-file server/.env orya-server
+#   - Exposed ports: 4001 (Gateway), 8000 (Graphiti), 7474 (Neo4j Browser), 7687 (Bolt)
+#   - Required env: see server/.env.example
+#   - Volume: /var/lib/neo4j/data + /var/lib/postgresql/data
 
-# ── Stage 1: Grab FalkorDB module from official image ──────────────
-FROM falkordb/falkordb:latest AS falkordb-source
-
-# ── Stage 2: Main image ───────────────────────────────────────────
 FROM ubuntu:24.04
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
-# ── System deps ────────────────────────────────────────────────────
+# System packages: Java (required by Neo4j), Python 3.12, Postgres 16, Bun deps, supervisor.
 RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    unzip \
-    python3 \
-    python3-venv \
-    redis-server \
-    redis-tools \
-    supervisor \
-    libgomp1 \
+        ca-certificates \
+        curl \
+        gnupg \
+        libgomp1 \
+        postgresql \
+        postgresql-contrib \
+        python3 \
+        python3-venv \
+        supervisor \
+        unzip \
+        wget \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Install uv (fast Python package manager) ──────────────────────
+# Install Neo4j Community Server
+RUN wget -O - https://debian.neo4j.com/neotechnology.gpg.key | gpg --dearmor -o /usr/share/keyrings/neo4j.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/neo4j.gpg] https://debian.neo4j.com stable 5" > /etc/apt/sources.list.d/neo4j.list && \
+    apt-get update && apt-get install -y openjdk-17-jre-headless neo4j && \
+    rm -rf /var/lib/apt/lists/*
+
+# Configure Neo4j: set initial password, enable auth, raise auth limits, and listen on all interfaces
+RUN neo4j-admin dbms set-initial-password "orya_neo4j_password_2026" && \
+    echo "dbms.security.auth_enabled=true" >> /etc/neo4j/neo4j.conf && \
+    echo "dbms.security.auth_max_failed_attempts=1000" >> /etc/neo4j/neo4j.conf && \
+    echo "server.default_listen_address=0.0.0.0" >> /etc/neo4j/neo4j.conf && \
+    echo "server.bolt.listen_address=0.0.0.0:7687" >> /etc/neo4j/neo4j.conf && \
+    echo "server.http.listen_address=0.0.0.0:7474" >> /etc/neo4j/neo4j.conf
+
+# uv (fast Python package manager)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
-# ── Copy FalkorDB module + Redis 8 from stage 1 ───────────────────
-COPY --from=falkordb-source /var/lib/falkordb/bin/falkordb.so /opt/falkordb/falkordb.so
-COPY --from=falkordb-source /usr/local/bin/redis-server /usr/local/bin/redis-server
-COPY --from=falkordb-source /usr/local/bin/redis-cli /usr/local/bin/redis-cli
-
-# ── Install Bun ───────────────────────────────────────────────────
+# Bun (Gateway runtime)
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:$PATH"
 
-# ── Setup Gateway (Hono/Bun) ─────────────────────────────────────
+# ── PostgreSQL setup (init runs on first boot via init-postgres.sh) ──
+RUN mkdir -p /var/lib/postgresql/data \
+    && chown -R postgres:postgres /var/lib/postgresql \
+    && chmod 700 /var/lib/postgresql/data
+COPY db/init.sql /docker-entrypoint-initdb.d/init.sql
+COPY scripts/init-postgres.sh /usr/local/bin/init-postgres.sh
+RUN chmod +x /usr/local/bin/init-postgres.sh
+
+# ── Agent (LangGraph) ────────────────────────────────────────────
+WORKDIR /app/agent
+COPY agent/requirements.txt ./requirements.txt
+RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
+COPY agent/ ./
+
+# ── Graphiti REST server ─────────────────────────────────────────
+WORKDIR /app/graphiti-server
+COPY graphiti-server/requirements.txt ./requirements.txt
+RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
+COPY graphiti-server/ ./
+
+# ── Gateway (Hono/Bun) ───────────────────────────────────────────
 WORKDIR /app/gateway
-COPY gateway/package.json gateway/bun.lock* ./
+COPY gateway/package.json gateway/tsconfig.json gateway/bun.lock* ./
 RUN bun install
-COPY gateway/ .
+COPY gateway/ ./
 
-# ── Setup Python services (using uv for speed) ────────────────────
-WORKDIR /app/agent-orya
-COPY services/agent-orya/requirements.txt .
-RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
-COPY services/agent-orya/ .
-
-WORKDIR /app/orchestrator
-COPY services/orchestrator/requirements.txt .
-RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
-COPY services/orchestrator/ .
-
-WORKDIR /app/memory
-COPY services/memory/requirements.txt .
-RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
-COPY services/memory/ .
-
-# ── Data volume ───────────────────────────────────────────────────
+# ── Persistent volumes ───────────────────────────────────────────
 RUN mkdir -p /data
-VOLUME /data
+VOLUME /data /var/lib/postgresql/data /var/lib/neo4j/data
 
-# ── Supervisor config (lance tous les process) ────────────────────
+# ── Supervisor config ────────────────────────────────────────────
 COPY supervisord.conf /etc/supervisor/conf.d/orya.conf
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY scripts/wait-for-neo4j.py /app/wait-for-neo4j.py
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# ── Expose only the gateway port ─────────────────────────────────
-EXPOSE 4001
-
-# ── Health check ──────────────────────────────────────────────────
-HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:4001/health || exit 1
-
-# ── Start everything via supervisor ──────────────────────────────
+# ── Run from /app so `agent.main:app` resolves as a package ──────
 WORKDIR /app
-CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/orya.conf"]
+
+EXPOSE 4001 8000 7474 7687
+
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+    CMD curl -fsS http://localhost:4001/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

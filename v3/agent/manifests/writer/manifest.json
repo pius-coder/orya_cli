@@ -1,0 +1,5 @@
+{
+  "task_id": "writer",
+  "name": "Writer",
+  "description": "Main response generator for Orya. Decides tool usage and crafts replies."
+}
